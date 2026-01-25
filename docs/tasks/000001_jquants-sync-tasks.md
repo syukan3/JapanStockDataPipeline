@@ -40,23 +40,25 @@
 
 ### Phase 3: 基盤ライブラリ
 
-- [ ] src/lib/supabase/client.ts - ブラウザ用クライアント
-- [ ] src/lib/supabase/admin.ts - Service Role クライアント
-- [ ] src/lib/jquants/types.ts - 型定義
-- [ ] src/lib/jquants/rate-limiter.ts - トークンバケット (60 req/min)
-- [ ] src/lib/jquants/client.ts - API クライアント
-- [ ] src/lib/utils/date.ts - JST日付ユーティリティ
-- [ ] src/lib/utils/retry.ts - 指数バックオフ
-- [ ] src/lib/utils/batch.ts - バッチ処理
-- [ ] src/lib/utils/logger.ts - 構造化ロギング
-- [ ] src/lib/cron/auth.ts - CRON_SECRET 検証
-- [ ] src/lib/cron/job-lock.ts - テーブルベースロック
-- [ ] src/lib/cron/job-run.ts - 実行ログ管理
-- [ ] src/lib/cron/heartbeat.ts - 死活監視
-- [ ] src/lib/cron/catch-up.ts - キャッチアップ
-- [ ] src/lib/cron/business-day.ts - 営業日判定
-- [ ] src/lib/notification/email.ts - Resend クライアント
-- [ ] src/lib/notification/templates.ts - メールテンプレート
+- [x] src/lib/supabase/client.ts - ブラウザ用クライアント
+- [x] src/lib/supabase/admin.ts - Service Role クライアント
+- [x] src/lib/supabase/server.ts - Server Components用クライアント
+- [x] src/lib/jquants/types.ts - 型定義
+- [x] src/lib/jquants/rate-limiter.ts - トークンバケット (60 req/min)
+- [x] src/lib/jquants/client.ts - API クライアント
+- [x] src/lib/utils/date.ts - JST日付ユーティリティ
+- [x] src/lib/utils/retry.ts - 指数バックオフ
+- [x] src/lib/utils/batch.ts - バッチ処理
+- [x] src/lib/utils/logger.ts - 構造化ロギング
+- [x] src/lib/utils/html.ts - HTML生成ユーティリティ
+- [x] src/lib/cron/auth.ts - CRON_SECRET 検証
+- [x] src/lib/cron/job-lock.ts - テーブルベースロック
+- [x] src/lib/cron/job-run.ts - 実行ログ管理
+- [x] src/lib/cron/heartbeat.ts - 死活監視
+- [x] src/lib/cron/catch-up.ts - キャッチアップ
+- [x] src/lib/cron/business-day.ts - 営業日判定
+- [x] src/lib/notification/email.ts - Resend クライアント
+- [x] src/lib/notification/templates.ts - メールテンプレート
 
 ### Phase 4: J-Quants エンドポイント
 
