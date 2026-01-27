@@ -403,113 +403,125 @@ export interface EarningsCalendarResponse {
 
 /**
  * 投資部門別売買状況（1レコード分）
- * V2フィールド: 省略形を使用（49フィールド）
+ * V2フィールド: 実際のAPIレスポンスフィールド名を使用
+ *
+ * NOTE: APIフィールド名の命名規則
+ * - 投資主体: Prop, Brk, InvTr, BusCo, OthCo, InsCo, Bank, TrstBnk, OthFin, Ind, Frgn, Tot, SecCo
+ * - 指標: Sell, Buy, Tot, Bal
  */
 export interface InvestorTypeTradingItem {
   /** 公表日 (YYYY-MM-DD) */
   PubDate: string;
   /** 開始日 (YYYY-MM-DD) */
-  StartDate: string;
+  StDate: string;
   /** 終了日 (YYYY-MM-DD) */
-  EndDate: string;
-  /** セクション (TSEPrime, TSEStandard, TSEGrowth, Total 等) */
+  EnDate: string;
+  /** セクション (TSEPrime, TSEStandard, TSEGrowth 等) */
   Section: string;
   /** 証券会社（自己取引） - 売り */
-  PropS?: number;
+  PropSell?: number;
   /** 証券会社（自己取引） - 買い */
-  PropP?: number;
+  PropBuy?: number;
   /** 証券会社（自己取引） - 合計 */
-  PropT?: number;
-  /** 証券会社（自己取引） - 残高 */
-  PropB?: number;
+  PropTot?: number;
+  /** 証券会社（自己取引） - 差引 */
+  PropBal?: number;
   /** 証券会社（委託） - 売り */
-  BrokS?: number;
+  BrkSell?: number;
   /** 証券会社（委託） - 買い */
-  BrokP?: number;
+  BrkBuy?: number;
   /** 証券会社（委託） - 合計 */
-  BrokT?: number;
-  /** 証券会社（委託） - 残高 */
-  BrokB?: number;
+  BrkTot?: number;
+  /** 証券会社（委託） - 差引 */
+  BrkBal?: number;
   /** 投資信託 - 売り */
-  InvTrS?: number;
+  InvTrSell?: number;
   /** 投資信託 - 買い */
-  InvTrP?: number;
+  InvTrBuy?: number;
   /** 投資信託 - 合計 */
-  InvTrT?: number;
-  /** 投資信託 - 残高 */
-  InvTrB?: number;
+  InvTrTot?: number;
+  /** 投資信託 - 差引 */
+  InvTrBal?: number;
   /** 事業法人 - 売り */
-  BusCoS?: number;
+  BusCoSell?: number;
   /** 事業法人 - 買い */
-  BusCoP?: number;
+  BusCoBuy?: number;
   /** 事業法人 - 合計 */
-  BusCoT?: number;
-  /** 事業法人 - 残高 */
-  BusCoB?: number;
+  BusCoTot?: number;
+  /** 事業法人 - 差引 */
+  BusCoBal?: number;
   /** その他法人 - 売り */
-  OthCoS?: number;
+  OthCoSell?: number;
   /** その他法人 - 買い */
-  OthCoP?: number;
+  OthCoBuy?: number;
   /** その他法人 - 合計 */
-  OthCoT?: number;
-  /** その他法人 - 残高 */
-  OthCoB?: number;
+  OthCoTot?: number;
+  /** その他法人 - 差引 */
+  OthCoBal?: number;
   /** 生保・損保 - 売り */
-  InsCoS?: number;
+  InsCoSell?: number;
   /** 生保・損保 - 買い */
-  InsCoP?: number;
+  InsCoBuy?: number;
   /** 生保・損保 - 合計 */
-  InsCoT?: number;
-  /** 生保・損保 - 残高 */
-  InsCoB?: number;
+  InsCoTot?: number;
+  /** 生保・損保 - 差引 */
+  InsCoBal?: number;
   /** 都銀・地銀等 - 売り */
-  CityBkS?: number;
+  BankSell?: number;
   /** 都銀・地銀等 - 買い */
-  CityBkP?: number;
+  BankBuy?: number;
   /** 都銀・地銀等 - 合計 */
-  CityBkT?: number;
-  /** 都銀・地銀等 - 残高 */
-  CityBkB?: number;
+  BankTot?: number;
+  /** 都銀・地銀等 - 差引 */
+  BankBal?: number;
   /** 信託銀行 - 売り */
-  TrBkS?: number;
+  TrstBnkSell?: number;
   /** 信託銀行 - 買い */
-  TrBkP?: number;
+  TrstBnkBuy?: number;
   /** 信託銀行 - 合計 */
-  TrBkT?: number;
-  /** 信託銀行 - 残高 */
-  TrBkB?: number;
+  TrstBnkTot?: number;
+  /** 信託銀行 - 差引 */
+  TrstBnkBal?: number;
   /** その他金融機関 - 売り */
-  OthFIS?: number;
+  OthFinSell?: number;
   /** その他金融機関 - 買い */
-  OthFIP?: number;
+  OthFinBuy?: number;
   /** その他金融機関 - 合計 */
-  OthFIT?: number;
-  /** その他金融機関 - 残高 */
-  OthFIB?: number;
+  OthFinTot?: number;
+  /** その他金融機関 - 差引 */
+  OthFinBal?: number;
   /** 個人 - 売り */
-  IndS?: number;
+  IndSell?: number;
   /** 個人 - 買い */
-  IndP?: number;
+  IndBuy?: number;
   /** 個人 - 合計 */
-  IndT?: number;
-  /** 個人 - 残高 */
-  IndB?: number;
+  IndTot?: number;
+  /** 個人 - 差引 */
+  IndBal?: number;
   /** 外国人 - 売り */
-  ForS?: number;
+  FrgnSell?: number;
   /** 外国人 - 買い */
-  ForP?: number;
+  FrgnBuy?: number;
   /** 外国人 - 合計 */
-  ForT?: number;
-  /** 外国人 - 残高 */
-  ForB?: number;
+  FrgnTot?: number;
+  /** 外国人 - 差引 */
+  FrgnBal?: number;
+  /** 証券会社（受託） - 売り */
+  SecCoSell?: number;
+  /** 証券会社（受託） - 買い */
+  SecCoBuy?: number;
+  /** 証券会社（受託） - 合計 */
+  SecCoTot?: number;
+  /** 証券会社（受託） - 差引 */
+  SecCoBal?: number;
   /** 合計 - 売り */
-  TotalS?: number;
+  TotSell?: number;
   /** 合計 - 買い */
-  TotalP?: number;
+  TotBuy?: number;
   /** 合計 - 合計 */
-  TotalT?: number;
-  /** 合計 - 残高 */
-  TotalB?: number;
+  TotTot?: number;
+  /** 合計 - 差引 */
+  TotBal?: number;
 }
 
 /**
@@ -620,9 +632,9 @@ export interface EarningsCalendarRecord {
 /**
  * investor_type_trading テーブル用（縦持ち）
  *
- * NOTE: raw_jsonはストレージ効率のため最初のレコードのみに格納。
- * 他のレコードはraw_json: nullとなる。元データが必要な場合は
- * investor_type='Total', metric='sales'のレコードを参照すること。
+ * NOTE: raw_jsonはストレージ効率のため最初のレコードのみに完全格納。
+ * 他のレコードは空オブジェクト{}となる。元データが必要な場合は
+ * investor_type='proprietary', metric='sales'のレコードを参照すること。
  */
 export interface InvestorTypeTradingRecord {
   published_date: string;
@@ -632,7 +644,7 @@ export interface InvestorTypeTradingRecord {
   investor_type: string;
   metric: string;
   value_kjpy?: number;
-  raw_json: InvestorTypeTradingItem | null;
+  raw_json: InvestorTypeTradingItem | Record<string, never>;
   ingested_at?: string;
 }
 

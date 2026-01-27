@@ -9,7 +9,15 @@
     "lint": "next lint",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:calendar": "tsx scripts/seed/calendar.ts",
+    "seed:master": "tsx scripts/seed/equity-master.ts",
+    "seed:topix": "tsx scripts/seed/topix.ts",
+    "seed:bars": "tsx scripts/seed/equity-bars.ts",
+    "seed:financial": "tsx scripts/seed/financial.ts",
+    "seed:earnings": "tsx scripts/seed/earnings.ts",
+    "seed:investors": "tsx scripts/seed/investor-types.ts",
+    "seed:all": "tsx scripts/seed/index.ts"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.36.0",
@@ -26,8 +34,10 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
+    "dotenv": "^16.4.7",
     "eslint": "^9.18.0",
     "eslint-config-next": "^16.1.4",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.53.1",
     "vitest": "^4.0.18"

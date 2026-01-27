@@ -36,23 +36,45 @@ export interface SyncInvestorTypesResult {
   errors: Error[];
 }
 
-/** 投資主体種別 */
+/**
+ * 投資主体種別（APIフィールドプレフィックス）
+ *
+ * NOTE: DBに保存する際はより明確な名前に変換（INVESTOR_TYPE_DB_NAMES）
+ */
 export const INVESTOR_TYPES = [
   'Prop',     // 証券会社（自己取引）
-  'Brok',     // 証券会社（委託）
+  'Brk',      // 証券会社（委託）
   'InvTr',    // 投資信託
   'BusCo',    // 事業法人
   'OthCo',    // その他法人
   'InsCo',    // 生保・損保
-  'CityBk',   // 都銀・地銀等
-  'TrBk',     // 信託銀行
-  'OthFI',    // その他金融機関
+  'Bank',     // 都銀・地銀等
+  'TrstBnk',  // 信託銀行
+  'OthFin',   // その他金融機関
   'Ind',      // 個人
-  'For',      // 外国人
-  'Total',    // 合計
+  'Frgn',     // 外国人
+  'SecCo',    // 証券会社（受託）
+  'Tot',      // 合計
 ] as const;
 
 export type InvestorType = typeof INVESTOR_TYPES[number];
+
+/** 投資主体の日本語名（DB保存用） */
+export const INVESTOR_TYPE_DB_NAMES: Record<InvestorType, string> = {
+  Prop: 'proprietary',      // 証券会社（自己取引）
+  Brk: 'brokerage',         // 証券会社（委託）
+  InvTr: 'investment_trust', // 投資信託
+  BusCo: 'business_corp',   // 事業法人
+  OthCo: 'other_corp',      // その他法人
+  InsCo: 'insurance',       // 生保・損保
+  Bank: 'bank',             // 都銀・地銀等
+  TrstBnk: 'trust_bank',    // 信託銀行
+  OthFin: 'other_financial', // その他金融機関
+  Ind: 'individual',        // 個人
+  Frgn: 'foreign',          // 外国人
+  SecCo: 'securities_co',   // 証券会社（受託）
+  Tot: 'total',             // 合計
+};
 
 /** セクション種別（J-Quants API V2で返却される値） */
 export const SECTIONS = [
@@ -63,31 +85,31 @@ export const SECTIONS = [
   'TSE2nd',       // 東証二部（過去データ）
   'TSEMothers',   // マザーズ（過去データ）
   'JASDAQ',       // JASDAQ（過去データ）
-  'Total',        // 合計
+  'Total',        // 合計（APIには存在しない可能性あり）
 ] as const;
 
 export type Section = typeof SECTIONS[number];
 
-/** 指標種別 */
-export const METRICS = ['S', 'P', 'T', 'B'] as const;
+/** 指標種別（APIフィールドサフィックス） */
+export const METRICS = ['Sell', 'Buy', 'Tot', 'Bal'] as const;
 export type Metric = typeof METRICS[number];
 
-/** 指標名マッピング */
+/** 指標名マッピング（DB保存用） */
 export const METRIC_NAMES: Record<Metric, string> = {
-  S: 'sales',      // 売り
-  P: 'purchases',  // 買い
-  T: 'total',      // 合計
-  B: 'balance',    // 残高（差引）
+  Sell: 'sales',      // 売り
+  Buy: 'purchases',   // 買い
+  Tot: 'total',       // 合計
+  Bal: 'balance',     // 残高（差引）
 };
 
 /**
  * APIレスポンスを縦持ちレコードに変換
  *
- * 1つのAPIレスポンスから 12投資主体 × 4指標 = 48レコードを生成
+ * 1つのAPIレスポンスから 13投資主体 × 4指標 = 52レコードを生成
  *
- * NOTE: raw_jsonはストレージ効率のため最初のレコード（Total/sales）のみに格納。
- * 他のレコードはraw_json: nullとなる。元データが必要な場合は
- * investor_type='Total', metric='sales'のレコードを参照すること。
+ * NOTE: raw_jsonはストレージ効率のため最初のレコード（proprietary/sales）のみに完全格納。
+ * 他のレコードは空オブジェクト{}となる。元データが必要な場合は
+ * investor_type='proprietary', metric='sales'のレコードを参照すること。
  */
 export function toInvestorTypeTradingRecords(
   item: InvestorTypeTradingItem
@@ -96,8 +118,8 @@ export function toInvestorTypeTradingRecords(
 
   const baseRecord = {
     published_date: item.PubDate,
-    start_date: item.StartDate,
-    end_date: item.EndDate,
+    start_date: item.StDate,
+    end_date: item.EnDate,
     section: item.Section,
   };
 
@@ -113,11 +135,11 @@ export function toInvestorTypeTradingRecords(
       if (value !== undefined && value !== null) {
         records.push({
           ...baseRecord,
-          investor_type: investorType,
+          investor_type: INVESTOR_TYPE_DB_NAMES[investorType],
           metric: METRIC_NAMES[metricKey],
           value_kjpy: value as number,
-          // raw_jsonは最初のレコードのみに格納（ストレージ効率化）
-          raw_json: isFirstRecord ? item : null,
+          // raw_jsonは最初のレコードのみに完全格納、他は空オブジェクト（DB NOT NULL制約対応）
+          raw_json: isFirstRecord ? item : ({} as InvestorTypeTradingItem),
         });
         isFirstRecord = false;
       }
@@ -330,7 +352,7 @@ export async function getInvestorTypesFromDB(
  */
 export async function getInvestorTypeDataFromDB(
   section: string,
-  investorType: InvestorType,
+  investorType: string,
   startDate: string,
   endDate: string,
   options?: { includeRawJson?: boolean }
@@ -431,7 +453,7 @@ export async function getAvailableSectionsFromDB(
     .from(TABLE_NAME)
     .select('section')
     .eq('published_date', latestDate)
-    .eq('investor_type', 'Total')
+    .eq('investor_type', 'total')
     .eq('metric', 'sales')
     .order('section', { ascending: true });
 
@@ -496,7 +518,7 @@ export async function getForeignInvestorTrendFromDB(
       .from(TABLE_NAME)
       .select('*')
       .eq('section', section)
-      .eq('investor_type', 'For')
+      .eq('investor_type', 'foreign')
       .eq('metric', 'balance')
       .order('start_date', { ascending: false })
       .limit(validLimit);
@@ -513,7 +535,7 @@ export async function getForeignInvestorTrendFromDB(
     .from(TABLE_NAME)
     .select(BASIC_COLUMNS)
     .eq('section', section)
-    .eq('investor_type', 'For')
+    .eq('investor_type', 'foreign')
     .eq('metric', 'balance')
     .order('start_date', { ascending: false })
     .limit(validLimit);
