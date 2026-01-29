@@ -9,10 +9,14 @@ on:
     - cron: '40 9 * * *'  # JST 18:40
   workflow_dispatch:       # 手動実行
 
+concurrency:
+  group: cron-a
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: production
 
     steps:
@@ -41,7 +45,7 @@ jobs:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx tsx scripts/cron/equity-bars-direct.ts
+        run: npx tsx scripts/cron/cron-a-direct.ts equity_bars
 
       - name: Trigger Cron A - TOPIX
         run: |
@@ -59,13 +63,12 @@ jobs:
             -d '{"dataset": "financial"}' \
             --fail --silent --show-error --max-time 300
 
-      - name: Trigger Cron A - Equity Master
-        run: |
-          curl -X POST "${{ secrets.VERCEL_URL }}/api/cron/jquants/a" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json" \
-            -d '{"dataset": "equity_master"}' \
-            --fail --silent --show-error --max-time 120
+      - name: Sync Equity Master (direct)
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/cron-a-direct.ts equity_master
 
       - name: Notify on failure
         if: failure()
