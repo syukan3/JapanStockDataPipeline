@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TB
     subgraph GitHub["GitHub Actions (Scheduler)"]
-        CronA["Cron A<br/>JST 09:20<br/>日次確定データ"]
+        CronA["Cron A<br/>JST 18:40<br/>日次確定データ"]
         CronB["Cron B<br/>JST 19:20<br/>決算発表予定"]
         CronC["Cron C<br/>JST 12:10<br/>投資部門別"]
         Backup["Backup<br/>週次日曜<br/>DBバックアップ"]
@@ -282,7 +282,7 @@ gantt
     axisFormat %H:%M
 
     section Cron A
-    日次確定データ同期 :a1, 09:20, 10m
+    日次確定データ同期 :a1, 18:40, 10m
 
     section Cron C
     投資部門別 + 整合性チェック :c1, 12:10, 5m

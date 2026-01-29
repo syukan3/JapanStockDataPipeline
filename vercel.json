@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/jquants/a",
-      "schedule": "20 0 * * *"
+      "schedule": "40 9 * * *"
     },
     {
       "path": "/api/cron/jquants/b",

@@ -1,12 +1,12 @@
 # Cron A - Daily Data Sync
-# JST 09:20 (UTC 00:20) - 前営業日の確定データ取り込み
+# JST 18:40 (UTC 09:40) - 当日の確定データ取り込み（市場終了後）
 # 対象: カレンダー、株価、TOPIX、財務、銘柄マスタ
 
 name: Cron A - Daily Data Sync
 
 on:
   schedule:
-    - cron: '20 0 * * *'  # JST 09:20
+    - cron: '40 9 * * *'  # JST 18:40
   workflow_dispatch:       # 手動実行
 
 jobs:

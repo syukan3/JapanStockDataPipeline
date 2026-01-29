@@ -59,7 +59,7 @@ J-Quants API V2（2025年12月リリース）の主な変更点:
 - [x] .env.local.example 作成
 - [x] src/app/layout.tsx 作成
 - [x] src/app/page.tsx 作成
-- [x] .github/workflows/cron-a.yml - 日次確定データスケジューラ（JST 09:20）
+- [x] .github/workflows/cron-a.yml - 日次確定データスケジューラ（JST 18:40）
 - [x] .github/workflows/cron-b.yml - 決算発表予定スケジューラ（JST 19:20）
 - [x] .github/workflows/cron-c.yml - 投資部門別スケジューラ（JST 12:10）
 - [x] .github/workflows/backup.yml - 週次バックアップ

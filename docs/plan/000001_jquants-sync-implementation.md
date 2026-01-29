@@ -22,7 +22,7 @@
 JapanStockAnalyzer/
 ├── .github/
 │   └── workflows/
-│       ├── cron-a.yml              # 日次確定データ（JST 09:20）
+│       ├── cron-a.yml              # 日次確定データ（JST 18:40）
 │       ├── cron-b.yml              # 決算発表予定（JST 19:20）
 │       ├── cron-c.yml              # 投資部門別（JST 12:10）
 │       └── backup.yml              # 週次バックアップ
@@ -124,8 +124,8 @@ JapanStockAnalyzer/
 | 項目 | 値 |
 |------|-----|
 | 目的 | 前営業日分の「確定」データをまとめて取り込み |
-| 推奨時刻 | JST 09:20（**UTC 00:20**） |
-| GitHub Actions | `cron: '20 0 * * *'` |
+| 推奨時刻 | JST 18:40（**UTC 09:40**） |
+| GitHub Actions | `cron: '40 9 * * *'` |
 
 **処理対象**：
 - 株価四本値（日足）：`date = 前営業日`
@@ -178,7 +178,7 @@ name: Cron A - Daily Data Sync
 
 on:
   schedule:
-    - cron: '20 0 * * *'  # JST 09:20
+    - cron: '40 9 * * *'  # JST 18:40
   workflow_dispatch:       # 手動実行も可能
 
 jobs:
