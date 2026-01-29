@@ -24,7 +24,10 @@ export const CronAChunkRequestSchema = z.object({
   pagination_key: z.string().max(1024).optional(),
   /** 対象日付（省略時はキャッチアップで自動決定） */
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD format').optional(),
-});
+}).refine(
+  (data) => !data.pagination_key || data.date,
+  { message: 'date is required when pagination_key is provided', path: ['date'] }
+);
 
 export type CronAChunkRequest = z.infer<typeof CronAChunkRequestSchema>;
 

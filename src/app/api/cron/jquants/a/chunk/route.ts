@@ -35,12 +35,13 @@ export async function POST(request: Request): Promise<Response> {
   // 2. リクエストボディのパースとバリデーション
   let body: unknown;
   try {
-    body = await request.json();
+    const rawText = await request.text();
+    body = rawText.trim() === '' ? {} : JSON.parse(rawText);
   } catch {
-    // bodyが空（初回呼び出し）の場合、空オブジェクトとして処理を続行。
-    // 親ルート（a/route.ts）はbody必須のため400を返すが、
-    // chunkルートではbodyなし=初回ページ取得として設計している。
-    body = {};
+    return NextResponse.json(
+      { error: 'Invalid JSON in request body' },
+      { status: 400 }
+    );
   }
 
   const parsed = CronAChunkRequestSchema.safeParse(body);

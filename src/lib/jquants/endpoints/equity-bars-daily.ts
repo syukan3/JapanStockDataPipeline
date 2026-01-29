@@ -309,6 +309,12 @@ export async function syncEquityBarsDailySinglePage(
 
     timer.end({ fetched, inserted: result.inserted, hasNextPage: !!paginationKey });
 
+    if (result.errors.length > 0) {
+      throw new Error(
+        `batchUpsert failed with ${result.errors.length} error(s): ${result.errors[0].message}`
+      );
+    }
+
     return {
       fetched,
       inserted: result.inserted,
