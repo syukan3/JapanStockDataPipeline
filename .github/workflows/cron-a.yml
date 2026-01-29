@@ -22,7 +22,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             -d '{"dataset": "calendar"}' \
-            --fail --silent --show-error --max-time 30
+            --fail --silent --show-error --max-time 120
 
       - name: Trigger Cron A - Equity Bars
         run: |
@@ -30,7 +30,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             -d '{"dataset": "equity_bars"}' \
-            --fail --silent --show-error --max-time 30
+            --fail --silent --show-error --max-time 300
 
       - name: Trigger Cron A - TOPIX
         run: |
@@ -38,7 +38,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             -d '{"dataset": "topix"}' \
-            --fail --silent --show-error --max-time 30
+            --fail --silent --show-error --max-time 120
 
       - name: Trigger Cron A - Financial
         run: |
@@ -46,7 +46,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             -d '{"dataset": "financial"}' \
-            --fail --silent --show-error --max-time 30
+            --fail --silent --show-error --max-time 300
 
       - name: Trigger Cron A - Equity Master
         run: |
@@ -54,7 +54,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             -d '{"dataset": "equity_master"}' \
-            --fail --silent --show-error --max-time 30
+            --fail --silent --show-error --max-time 120
 
       - name: Notify on failure
         if: failure()
