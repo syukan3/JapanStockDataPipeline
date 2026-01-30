@@ -608,6 +608,8 @@ export interface EquityBarDailyRecord {
   adj_low?: number;
   adj_close?: number;
   adj_volume?: number;
+  upper_limit?: string;
+  lower_limit?: string;
   ingested_at?: string;
 }
 
@@ -643,6 +645,64 @@ export interface FinancialDisclosureRecord {
   period_type?: string;
   doc_type?: string;
   company_name?: string;
+  // 会計期間
+  cur_per_start?: string;
+  cur_per_end?: string;
+  // 希薄化EPS
+  diluted_eps?: number;
+  // BS
+  total_assets?: number;
+  equity?: number;
+  equity_to_asset_ratio?: number;
+  // CF
+  cf_operating?: number;
+  cf_investing?: number;
+  cf_financing?: number;
+  cash_equivalents?: number;
+  // ROA
+  roa?: number;
+  // 配当
+  dividend_1q?: number;
+  dividend_2q?: number;
+  dividend_3q?: number;
+  dividend_fy?: number;
+  dividend_annual?: number;
+  dividend_unit?: string;
+  // 今期予想
+  forecast_sales?: number;
+  forecast_op?: number;
+  forecast_odp?: number;
+  forecast_np?: number;
+  forecast_eps?: number;
+  forecast_dividend_ann?: number;
+  // 来期予想
+  next_forecast_sales?: number;
+  next_forecast_op?: number;
+  next_forecast_odp?: number;
+  next_forecast_np?: number;
+  next_forecast_eps?: number;
+  next_forecast_dividend_ann?: number;
+  // 変更・修正フラグ
+  material_change_subsidiary?: string;
+  significant_change_content?: string;
+  change_by_as_revision?: string;
+  change_no_as_revision?: string;
+  change_accounting_estimate?: string;
+  retroactive_restatement?: string;
+  // 株式数
+  shares_outstanding_fy?: number;
+  treasury_shares_fy?: number;
+  avg_shares?: number;
+  // 非連結
+  nc_sales?: number;
+  nc_op?: number;
+  nc_odp?: number;
+  nc_np?: number;
+  nc_eps?: number;
+  nc_total_assets?: number;
+  nc_equity?: number;
+  nc_equity_to_asset_ratio?: number;
+  nc_bps?: number;
   ingested_at?: string;
 }
 

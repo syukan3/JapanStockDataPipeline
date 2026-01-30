@@ -67,6 +67,8 @@ export function toEquityBarDailyRecord(
       adj_low: item.MAdjL,
       adj_close: item.MAdjC,
       adj_volume: item.MAdjVo,
+      upper_limit: item.MUL,
+      lower_limit: item.MLL,
     };
   }
 
@@ -87,6 +89,8 @@ export function toEquityBarDailyRecord(
       adj_low: item.AAdjL,
       adj_close: item.AAdjC,
       adj_volume: item.AAdjVo,
+      upper_limit: item.AUL,
+      lower_limit: item.ALL,
     };
   }
 
@@ -107,6 +111,8 @@ export function toEquityBarDailyRecord(
     adj_low: item.AdjL,
     adj_close: item.AdjC,
     adj_volume: item.AdjVo,
+    upper_limit: item.UL,
+    lower_limit: item.LL,
   };
 }
 

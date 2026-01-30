@@ -92,6 +92,64 @@ export function toFinancialDisclosureRecord(item: FinancialSummaryItem): Financi
     period_type: item.CurPerType,
     doc_type: item.DocType,
     company_name: item.CoName as string | undefined,
+    // 会計期間
+    cur_per_start: item.CurPerSt,
+    cur_per_end: item.CurPerEn,
+    // 希薄化EPS
+    diluted_eps: item.DEPS,
+    // BS
+    total_assets: item.TA,
+    equity: item.Eq,
+    equity_to_asset_ratio: item.EqAR,
+    // CF
+    cf_operating: item.CFO,
+    cf_investing: item.CFI,
+    cf_financing: item.CFF,
+    cash_equivalents: item.CashEq,
+    // ROA
+    roa: item.ROA,
+    // 配当
+    dividend_1q: item.Div1Q,
+    dividend_2q: item.Div2Q,
+    dividend_3q: item.Div3Q,
+    dividend_fy: item.DivFY,
+    dividend_annual: item.DivAnn,
+    dividend_unit: item.DivUnit,
+    // 今期予想
+    forecast_sales: item.FSales,
+    forecast_op: item.FOP,
+    forecast_odp: item.FOdP,
+    forecast_np: item.FNP,
+    forecast_eps: item.FEPS,
+    forecast_dividend_ann: item.FDivAnn,
+    // 来期予想
+    next_forecast_sales: item.NxFSales,
+    next_forecast_op: item.NxFOP,
+    next_forecast_odp: item.NxFOdP,
+    next_forecast_np: item.NxFNP,
+    next_forecast_eps: item.NxFEPS,
+    next_forecast_dividend_ann: item.NxFDivAnn,
+    // 変更・修正フラグ
+    material_change_subsidiary: item.MatChgSub,
+    significant_change_content: item.SigChgInC,
+    change_by_as_revision: item.ChgByASRev,
+    change_no_as_revision: item.ChgNoASRev,
+    change_accounting_estimate: item.ChgAcEst,
+    retroactive_restatement: item.RetroRst,
+    // 株式数
+    shares_outstanding_fy: item.ShOutFY,
+    treasury_shares_fy: item.TrShFY,
+    avg_shares: item.AvgSh,
+    // 非連結
+    nc_sales: item.NCSales,
+    nc_op: item.NCOP,
+    nc_odp: item.NCOdP,
+    nc_np: item.NCNP,
+    nc_eps: item.NCEPS,
+    nc_total_assets: item.NCTA,
+    nc_equity: item.NCEq,
+    nc_equity_to_asset_ratio: item.NCEqAR,
+    nc_bps: item.NCBPS,
   };
 }
 
