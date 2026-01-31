@@ -11,17 +11,21 @@ create schema if not exists jquants_ingest;
 comment on schema jquants_core is 'J-Quants API から取得したコアデータを格納するスキーマ';
 comment on schema jquants_ingest is 'データ取り込みジョブの管理・監視用スキーマ';
 
--- スキーマへのアクセス権限を付与
-grant usage on schema jquants_core to anon, authenticated, service_role;
-grant usage on schema jquants_ingest to anon, authenticated, service_role;
+-- スキーマへのアクセス権限を付与（最小権限原則: anonには付与しない）
+grant usage on schema jquants_core to authenticated, service_role;
+grant usage on schema jquants_ingest to service_role;
 
 -- 今後作成されるテーブル・シーケンスにもデフォルトで権限付与
+-- jquants_core: authenticated は SELECT のみ、service_role は ALL
 alter default privileges in schema jquants_core
-  grant all on tables to anon, authenticated, service_role;
+  grant select on tables to authenticated;
 alter default privileges in schema jquants_core
-  grant all on sequences to anon, authenticated, service_role;
+  grant all on tables to service_role;
+alter default privileges in schema jquants_core
+  grant all on sequences to service_role;
 
+-- jquants_ingest: service_role のみ
 alter default privileges in schema jquants_ingest
-  grant all on tables to anon, authenticated, service_role;
+  grant all on tables to service_role;
 alter default privileges in schema jquants_ingest
-  grant all on sequences to anon, authenticated, service_role;
+  grant all on sequences to service_role;

@@ -16,14 +16,12 @@ import { createLogger, type LogContext } from '../../utils/logger';
 import { getJSTDate } from '../../utils/date';
 import { sendJobFailureEmail } from '../../notification/email';
 
-// エンドポイント関数
-import {
-  syncTradingCalendarRange,
-  syncEquityBarsDailyForDate,
-  syncTopixBarsDailyForDate,
-  syncFinancialSummaryForDate,
-  syncEquityMasterSCD,
-} from '../../jquants/endpoints';
+// エンドポイント関数（バレルファイル経由を避け直接インポート）
+import { syncTradingCalendarRange } from '../../jquants/endpoints/trading-calendar';
+import { syncEquityBarsDailyForDate } from '../../jquants/endpoints/equity-bars-daily';
+import { syncTopixBarsDailyForDate } from '../../jquants/endpoints/index-topix';
+import { syncFinancialSummaryForDate } from '../../jquants/endpoints/fins-summary';
+import { syncEquityMasterSCD } from '../../jquants/endpoints/equity-master';
 
 // Cronユーティリティ
 import { determineTargetDates } from '../catch-up';

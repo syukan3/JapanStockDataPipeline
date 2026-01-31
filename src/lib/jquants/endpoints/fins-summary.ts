@@ -154,8 +154,8 @@ export function toFinancialDisclosureRecord(item: FinancialSummaryItem): Financi
 
   // J-Quants APIが空文字 "" を返す場合があり、numeric型カラムに挿入できないため null に変換
   for (const key of Object.keys(record) as (keyof FinancialDisclosureRecord)[]) {
-    if ((record as Record<string, unknown>)[key] === '') {
-      (record as Record<string, unknown>)[key] = null;
+    if ((record as unknown as Record<string, unknown>)[key] === '') {
+      (record as unknown as Record<string, unknown>)[key] = null;
     }
   }
 

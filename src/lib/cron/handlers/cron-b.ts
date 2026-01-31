@@ -9,8 +9,8 @@
 import { createLogger, type LogContext } from '../../utils/logger';
 import { sendJobFailureEmail } from '../../notification/email';
 
-// エンドポイント関数
-import { syncEarningsCalendar } from '../../jquants/endpoints';
+// エンドポイント関数（バレルファイル経由を避け直接インポート）
+import { syncEarningsCalendar } from '../../jquants/endpoints/earnings-calendar';
 
 // Cronユーティリティ
 import type { JobName } from '../job-run';

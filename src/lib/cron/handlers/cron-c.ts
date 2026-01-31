@@ -11,12 +11,10 @@ import { createLogger, type LogContext } from '../../utils/logger';
 import { sendJobFailureEmail } from '../../notification/email';
 import { getJSTDate, addDays } from '../../utils/date';
 
-// エンドポイント関数
-import {
-  syncInvestorTypesWithWindow,
-  getLatestEquityBarDateFromDB,
-  getLatestTopixBarDateFromDB,
-} from '../../jquants/endpoints';
+// エンドポイント関数（バレルファイル経由を避け直接インポート）
+import { syncInvestorTypesWithWindow } from '../../jquants/endpoints/investor-types';
+import { getLatestEquityBarDateFromDB } from '../../jquants/endpoints/equity-bars-daily';
+import { getLatestTopixBarDateFromDB } from '../../jquants/endpoints/index-topix';
 
 // Cronユーティリティ
 import type { JobName } from '../job-run';
@@ -190,16 +188,18 @@ export async function handleCronC(runId: string): Promise<CronCResult> {
     const windowDays = getInvestorTypesWindowDays();
     logger.info('Syncing investor types', { windowDays, runId });
 
-    const syncResult = await syncInvestorTypesWithWindow(windowDays, { logContext });
+    // 投資部門別同期と整合性チェックは独立しているため並列実行
+    const [syncResult, integrityCheckResult] = await Promise.all([
+      syncInvestorTypesWithWindow(windowDays, { logContext }),
+      runIntegrityCheck(logContext),
+    ]);
+    integrityCheck = integrityCheckResult;
 
     logger.info('Investor types sync completed', {
       runId,
       fetched: syncResult.fetched,
       inserted: syncResult.inserted,
     });
-
-    // 2. 整合性チェック
-    integrityCheck = await runIntegrityCheck(logContext);
 
     timer.end({
       fetched: syncResult.fetched,

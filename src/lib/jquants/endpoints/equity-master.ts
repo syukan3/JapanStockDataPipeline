@@ -532,14 +532,24 @@ export async function syncEquityMasterSCD(
     // 5a. 旧レコードをクローズ（更新 + 上場廃止）
     const allToClose = [...toClose, ...delistedRecords];
     if (allToClose.length > 0) {
+      // valid_toでグループ化してバッチUPDATE（N+1回避）
+      const byValidTo = new Map<string, number[]>();
       for (const { id, valid_to } of allToClose) {
+        const ids = byValidTo.get(valid_to);
+        if (ids) {
+          ids.push(id);
+        } else {
+          byValidTo.set(valid_to, [id]);
+        }
+      }
+      for (const [validTo, ids] of byValidTo) {
         const { error } = await supabase
           .from(TABLE_NAME_SCD)
-          .update({ valid_to, is_current: false })
-          .eq('id', id);
+          .update({ valid_to: validTo, is_current: false })
+          .in('id', ids);
 
         if (error) {
-          errors.push(new Error(`Failed to close record id=${id}: ${error.message}`));
+          errors.push(new Error(`Failed to close ${ids.length} records (valid_to=${validTo}): ${error.message}`));
         }
       }
       logger.info('Closed records', {

@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { createLogger, type LogContext } from '../../utils/logger';
-import { syncEquityBarsDailySinglePage } from '../../jquants/endpoints';
+import { syncEquityBarsDailySinglePage } from '../../jquants/endpoints/equity-bars-daily';
 import { determineTargetDates } from '../catch-up';
 import { createAdminClient } from '../../supabase/admin';
 import { startJobRun, completeJobRun } from '../job-run';

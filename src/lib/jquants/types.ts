@@ -581,8 +581,8 @@ export interface EquityMasterRecord {
   scale_category?: string;
   market_code?: string;
   market_name?: string;
-  margin_code?: string;
-  margin_code_name?: string;
+  margin_code?: string | null;
+  margin_code_name?: string | null;
   valid_from: string;
   valid_to?: string | null;
   is_current: boolean;

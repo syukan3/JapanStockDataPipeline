@@ -135,23 +135,25 @@ export async function findMissingDatesInTable(
     return [];
   }
 
-  // テーブルに存在する日付を取得
+  // テーブルに存在する日付を取得（RPC で DISTINCT を使い重複行の転送を回避）
   const { data, error } = await supabaseCore
-    .from(table)
-    .select(dateColumn)
-    .gte(dateColumn, startDate)
-    .lte(dateColumn, endDate)
-    .order(dateColumn);
+    .rpc('distinct_dates', {
+      p_schema: 'jquants_core',
+      p_table: table,
+      p_date_column: dateColumn,
+      p_start: startDate,
+      p_end: endDate,
+    });
 
   if (error) {
     logger.error('Failed to query table for missing dates', { table, error });
     return [];
   }
 
-  // データから日付を抽出
-  const rows = data as unknown as Array<Record<string, string>> | null;
+  // RPC は { date_value: string }[] を返す
+  const rows = data as Array<{ date_value: string }> | null;
   const existingDates = new Set(
-    rows?.map((row) => row[dateColumn]) ?? []
+    rows?.map((row) => row.date_value) ?? []
   );
 
   return businessDays.filter((day) => !existingDates.has(day));
