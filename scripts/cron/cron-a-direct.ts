@@ -13,7 +13,7 @@ import { createAdminClient } from '../../src/lib/supabase/admin';
 import { createLogger, type LogContext } from '../../src/lib/utils/logger';
 import { syncEquityBarsDailyForDate, syncEquityMasterSCD } from '../../src/lib/jquants/endpoints';
 import { getJSTDate } from '../../src/lib/utils/date';
-import { getPreviousBusinessDay } from '../../src/lib/cron/business-day';
+import { isBusinessDayInDB } from '../../src/lib/cron/business-day';
 
 const SUPPORTED_DATASETS = ['equity_bars', 'equity_master'] as const;
 type Dataset = (typeof SUPPORTED_DATASETS)[number];
@@ -66,13 +66,15 @@ async function main(): Promise<void> {
 
   const supabaseCore = createAdminClient('jquants_core');
 
-  // 処理対象日を決定（前営業日）
+  // 処理対象日を決定（当日）
   const today = getJSTDate();
-  const targetDate = await getPreviousBusinessDay(supabaseCore, today);
-
-  if (!targetDate) {
-    throw new Error('Could not determine previous business day (calendar data may be missing)');
+  const isBizDay = await isBusinessDayInDB(supabaseCore, today);
+  if (!isBizDay) {
+    logger.info('Today is not a business day, skipping', { today });
+    console.log(JSON.stringify({ success: true, skipped: true, reason: 'non-business-day', today }));
+    process.exit(0);
   }
+  const targetDate = today;
 
   logger.info(`Processing ${dataset}`, { targetDate });
 
