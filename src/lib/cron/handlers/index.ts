@@ -34,3 +34,13 @@ export {
   type CronCResult,
   type IntegrityCheckResult,
 } from './cron-c';
+
+// Cron D: マクロ経済データ同期
+export {
+  handleCronD,
+  CronDRequestSchema,
+  CRON_D_SOURCES,
+  type CronDSource,
+  type CronDRequest,
+  type CronDResult,
+} from './macro';

@@ -1,0 +1,68 @@
+# Cron D - Macro Economic Data Sync
+# JST 月〜金 07:00 (UTC 日〜木 22:00) - FRED/e-Stat マクロ経済指標取り込み
+# 米国市場閉場後のFREDデータ更新タイミングに合わせて実行
+
+name: "Cron D: Macro Data"
+
+on:
+  schedule:
+    - cron: '0 22 * * 0-4'  # UTC日〜木 22:00 = JST月〜金 07:00
+  workflow_dispatch:
+    inputs:
+      source:
+        description: '取得ソース'
+        type: choice
+        options:
+          - all
+          - fred
+          - estat
+        default: all
+      backfill_days:
+        description: '過去N日分をバックフィル（0=差分のみ）'
+        type: number
+        default: 0
+
+concurrency:
+  group: cron-d
+  cancel-in-progress: false
+
+jobs:
+  sync-macro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    steps:
+      - name: Trigger Cron D - Macro Data
+        run: |
+          SOURCE="${{ github.event.inputs.source || 'all' }}"
+          BACKFILL="${{ github.event.inputs.backfill_days || '0' }}"
+
+          echo "Source: ${SOURCE}, Backfill days: ${BACKFILL}"
+
+          RESPONSE=$(curl -X POST "${{ secrets.VERCEL_URL }}/api/cron/macro" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"source\": \"${SOURCE}\", \"backfill_days\": ${BACKFILL}}" \
+            --fail --silent --show-error --max-time 600 \
+            -w "\n%{http_code}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "HTTP Status: ${HTTP_CODE}"
+          echo "Response: ${BODY}"
+
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Cron D failed with HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          curl -X POST "${{ secrets.VERCEL_URL }}/api/notify/failure" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"job": "cron-d-macro", "workflow_run_id": "${{ github.run_id }}"}' \
+            --silent --show-error --max-time 30 || true
