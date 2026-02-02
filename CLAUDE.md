@@ -26,6 +26,14 @@
 - [Codex Review](.claude/skills/codex-review/SKILL.md)
   - Codex CLIを使った反復レビューゲート
 
+## GitHub CLI (gh)
+
+`gh` コマンド使用時は `.envrc` の `GH_TOKEN` を環境変数にセットして認証する。毎回聞かずに自動で行うこと。
+
+```bash
+export GH_TOKEN="$(grep GH_TOKEN .envrc | cut -d'"' -f2)"
+```
+
 ## Review Gate (codex-review)
 
 主要なマイルストーン（仕様書/計画の更新後、大規模な実装ステップ完了後（5ファイル以上/公開API/インフラ・設定変更）、commit/PR/release前）では、codex-reviewスキルを実行し、レビュー→修正→再レビューのサイクルを問題がなくなるまで繰り返すこと。
