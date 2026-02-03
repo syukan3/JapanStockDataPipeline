@@ -467,6 +467,8 @@ export async function syncEquityMasterSCD(
     logger.info('Effective date from API', { requestedDate: date, effectiveDate });
 
     // 2. 現在有効な全レコードを取得（デフォルト1000行制限を回避）
+    // NOTE: ORDER BY id は必須。PostgreSQLはORDER BY無しのLIMIT/OFFSETで
+    // 同一行が複数回返される可能性がある（ページ間で順序が保証されないため）
     const currentRecords: EquityMasterRecord[] = [];
     const PAGE_SIZE = 1000;
     let offset = 0;
@@ -476,6 +478,7 @@ export async function syncEquityMasterSCD(
         .from(TABLE_NAME_SCD)
         .select(SCD_BASIC_COLUMNS)
         .eq('is_current', true)
+        .order('id', { ascending: true })
         .range(offset, offset + PAGE_SIZE - 1);
 
       if (fetchError) {
