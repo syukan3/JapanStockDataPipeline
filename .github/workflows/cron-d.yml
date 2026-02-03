@@ -33,30 +33,30 @@ jobs:
     environment: production
 
     steps:
-      - name: Trigger Cron D - Macro Data
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync Macro Data (direct)
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          ESTAT_API_KEY: ${{ secrets.ESTAT_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
         run: |
           SOURCE="${{ github.event.inputs.source || 'all' }}"
           BACKFILL="${{ github.event.inputs.backfill_days || '0' }}"
-
-          echo "Source: ${SOURCE}, Backfill days: ${BACKFILL}"
-
-          RESPONSE=$(curl -X POST "${{ secrets.VERCEL_URL }}/api/cron/macro" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"source\": \"${SOURCE}\", \"backfill_days\": ${BACKFILL}}" \
-            --fail --silent --show-error --max-time 600 \
-            -w "\n%{http_code}")
-
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -n -1)
-
-          echo "HTTP Status: ${HTTP_CODE}"
-          echo "Response: ${BODY}"
-
-          if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "::error::Cron D failed with HTTP ${HTTP_CODE}"
-            exit 1
-          fi
+          npx tsx scripts/cron/cron-d-direct.ts --source="${SOURCE}" --backfill-days="${BACKFILL}"
 
       - name: Notify on failure
         if: failure()
