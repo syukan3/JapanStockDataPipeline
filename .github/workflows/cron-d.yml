@@ -1,12 +1,12 @@
 # Cron D - Macro Economic Data Sync
-# JST 月〜金 07:00 (UTC 日〜木 22:00) - FRED/e-Stat マクロ経済指標取り込み
+# JST 07:00 (UTC 22:00) - FRED/e-Stat マクロ経済指標取り込み
 # 米国市場閉場後のFREDデータ更新タイミングに合わせて実行
 
 name: "Cron D: Macro Data"
 
 on:
   schedule:
-    - cron: '0 22 * * 0-4'  # UTC日〜木 22:00 = JST月〜金 07:00
+    - cron: '0 22 * * *'  # JST 07:00
   workflow_dispatch:
     inputs:
       source:
