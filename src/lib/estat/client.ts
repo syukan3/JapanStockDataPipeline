@@ -165,7 +165,8 @@ export class EStatClient {
       : values;
 
     let skippedCount = 0;
-    const observations: ParsedEStatObservation[] = [];
+    // 同じ日付のデータは後勝ち（最新値）でマージ
+    const observationMap = new Map<string, ParsedEStatObservation>();
 
     for (const val of filteredValues) {
       const rawValue = val.$;
@@ -193,11 +194,14 @@ export class EStatClient {
         continue;
       }
 
-      observations.push({
+      // 同じ日付は上書き（後勝ち）
+      observationMap.set(date, {
         date,
         value: numValue,
       });
     }
+
+    const observations = Array.from(observationMap.values());
 
     this.logger.info('e-Stat observations fetched', {
       statsDataId,
