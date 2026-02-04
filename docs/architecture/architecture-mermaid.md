@@ -8,6 +8,7 @@ flowchart TB
         CronA["Cron A<br/>JST 18:40<br/>日次確定データ"]
         CronB["Cron B<br/>JST 19:20<br/>決算発表予定"]
         CronC["Cron C<br/>JST 12:10<br/>投資部門別"]
+        CronD["Cron D<br/>JST 07:00 (月〜金)<br/>マクロ経済指標"]
         Backup["Backup<br/>週次日曜<br/>DBバックアップ"]
     end
 
@@ -19,18 +20,22 @@ flowchart TB
 
     subgraph External["External APIs"]
         JQuants["J-Quants API V2"]
+        FRED["FRED API"]
+        eStat["e-Stat API"]
         Resend["Resend<br/>(Email)"]
     end
 
     subgraph Supabase["Supabase Postgres"]
         subgraph Core["jquants_core"]
-            equity_master["equity_master_snapshot"]
+            equity_master["equity_master<br/>(SCD Type 2)"]
             equity_bar["equity_bar_daily"]
             topix["topix_bar_daily"]
             calendar["trading_calendar"]
             investor["investor_type_trading"]
             financial["financial_disclosure"]
             earnings["earnings_calendar"]
+            macro_daily["macro_indicator_daily"]
+            macro_meta["macro_series_metadata"]
         end
         subgraph Ingest["jquants_ingest"]
             job_runs["job_runs"]
@@ -59,6 +64,12 @@ flowchart TB
     RouteA -.->|"失敗時"| Resend
     RouteB -.->|"失敗時"| Resend
     RouteC -.->|"失敗時"| Resend
+
+    CronD -->|"Direct Execution"| FRED
+    CronD -->|"Direct Execution"| eStat
+    CronD --> Core
+    CronD --> Ingest
+    CronD -.->|"失敗時"| Resend
 
     Backup --> Supabase
 ```

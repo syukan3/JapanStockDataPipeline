@@ -4,21 +4,22 @@ J-Quants API V2 データ同期基盤の運用ドキュメント。
 
 ## 概要
 
-本システムは J-Quants API V2 から日本株データを取得し、Supabase に保存するデータ同期基盤です。
+本システムは J-Quants API V2、FRED API、e-Stat API からマーケットデータを取得し、Supabase に保存するデータ同期基盤です。
 
 ### アーキテクチャ
 
 ```
 GitHub Actions (スケジューラー)
        │
-       ▼
-Vercel (Next.js Route Handler)
+       ├─→ Vercel (Next.js Route Handler) ─→ J-Quants API V2
+       │         │
+       │         └─→ Supabase (データ保存)
        │
-       ├─→ J-Quants API V2 (データ取得)
-       │
-       └─→ Supabase (データ保存)
-              │
-              └─→ Resend (障害通知)
+       └─→ GitHub Actions Runner (Cron D) ─→ FRED API / e-Stat API
+                 │
+                 └─→ Supabase (データ保存)
+                        │
+                        └─→ Resend (障害通知)
 ```
 
 ### 同期ジョブ一覧
@@ -28,18 +29,21 @@ Vercel (Next.js Route Handler)
 | Cron A | 日次確定データ | 18:40 |
 | Cron B | 決算発表予定 | 19:20 |
 | Cron C | 投資部門別 + 整合性チェック | 12:10 |
+| Cron D | マクロ経済指標 (FRED/e-Stat) | 07:00 (月〜金) |
 
 ### データセット
 
 | データセット | テーブル | 更新頻度 |
 |--------------|----------|----------|
 | 取引カレンダー | `trading_calendar` | 日次 |
-| 銘柄マスタ | `equity_master_snapshot` | 日次 |
+| 銘柄マスタ | `equity_master` | 日次 (SCD Type 2) |
 | 株価日足 | `equity_bar_daily` | 日次 |
 | TOPIX | `topix_bar_daily` | 日次 |
 | 財務サマリー | `financial_disclosure` | 日次 |
 | 決算発表予定 | `earnings_calendar` | 日次 |
 | 投資部門別 | `investor_type_trading` | 週次 |
+| マクロ経済指標 | `macro_indicator_daily` | 日次 (FRED/e-Stat) |
+| マクロ系列メタ | `macro_series_metadata` | - |
 
 ## ドキュメント一覧
 
@@ -53,12 +57,14 @@ Vercel (Next.js Route Handler)
 ```
 ├── jquants_core     # ビジネスデータ
 │   ├── trading_calendar
-│   ├── equity_master_snapshot
+│   ├── equity_master          # SCD Type 2 (変更履歴管理)
 │   ├── equity_bar_daily
 │   ├── topix_bar_daily
 │   ├── financial_disclosure
 │   ├── earnings_calendar
-│   └── investor_type_trading
+│   ├── investor_type_trading
+│   ├── macro_indicator_daily  # マクロ経済指標 (FRED/e-Stat)
+│   └── macro_series_metadata  # 系列メタデータ
 │
 └── jquants_ingest   # ジョブ管理・監視
     ├── job_locks

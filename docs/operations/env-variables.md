@@ -18,6 +18,22 @@
 
 > **取得方法**: [J-Quants ダッシュボード](https://application.jpx-jquants.com/) からAPIキーを発行
 
+### FRED API (Cron D)
+
+| 変数名 | 説明 | 例 |
+|--------|------|-----|
+| `FRED_API_KEY` | FRED API キー | `your-fred-api-key` |
+
+> **取得方法**: [FRED API Keys](https://fred.stlouisfed.org/docs/api/api_key.html) からAPIキーを発行（無料）
+
+### e-Stat API (Cron D)
+
+| 変数名 | 説明 | 例 |
+|--------|------|-----|
+| `ESTAT_API_KEY` | e-Stat API アプリケーション ID | `your-estat-app-id` |
+
+> **取得方法**: [e-Stat API](https://www.e-stat.go.jp/api/) でユーザー登録後、アプリケーション ID を発行（無料）
+
 ### Cron 認証
 
 | 変数名 | 説明 | 例 |
@@ -55,6 +71,10 @@
 2. **Repository secrets** に以下を追加:
    - `VERCEL_URL`: デプロイ先の Vercel URL（例: `https://your-app.vercel.app`）
    - `CRON_SECRET`: Cron 認証用シークレット
+   - `FRED_API_KEY`: FRED API キー（Cron D 用）
+   - `ESTAT_API_KEY`: e-Stat API アプリケーション ID（Cron D 用）
+   - `NEXT_PUBLIC_SUPABASE_URL`: Supabase プロジェクト URL（Cron D 用）
+   - `SUPABASE_SERVICE_ROLE_KEY`: Supabase サービスロールキー（Cron D 用）
 
 ### ローカル開発
 
@@ -85,6 +105,12 @@ ALERT_EMAIL_TO=your-email@example.com
 # Optional
 SYNC_MAX_CATCHUP_DAYS=5
 INVESTOR_TYPES_WINDOW_DAYS=60
+
+# FRED API (Cron D)
+FRED_API_KEY=your-fred-api-key
+
+# e-Stat API (Cron D)
+ESTAT_API_KEY=your-estat-app-id
 ```
 
 ## セキュリティ注意事項

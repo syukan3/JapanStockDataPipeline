@@ -1,5 +1,15 @@
 # マクロ経済データパイプライン実装計画（Cron D）
 
+> **Status: COMPLETED** (2026-02-03)
+>
+> この計画に基づく実装は完了しました。
+> - `src/lib/fred/` - FRED API クライアント
+> - `src/lib/estat/` - e-Stat API クライアント
+> - `src/lib/cron/handlers/macro.ts` - Cron D ハンドラー
+> - `scripts/cron/cron-d-direct.ts` - GitHub Actions 直接実行スクリプト
+> - `.github/workflows/cron-d.yml` - ワークフロー定義
+> - `supabase/migrations/00019_create_macro_indicator_daily.sql` - テーブル定義
+
 ## 概要
 
 FRED API と e-Stat API から日米マクロ経済指標を取得し、`jquants_core.macro_indicator_daily` に蓄積する。Scouter のマクロ環境判定の上流データソースとなる。
