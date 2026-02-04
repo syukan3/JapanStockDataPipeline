@@ -146,10 +146,38 @@ export class EStatClient {
     statsDataId: string,
     sourceFilter?: Record<string, string> | null
   ): Promise<{ observations: ParsedEStatObservation[]; skippedCount: number }> {
-    const response = await this.request('/json/getStatsData', {
+    // sourceFilter からサーバーサイドフィルタ用パラメータを構築
+    // キー名を e-Stat API パラメータ名に変換（tab→cdTab, cat01→cdCat01, area→cdArea）
+    const apiParams: Record<string, string> = {
       statsDataId,
       lang: 'J',
-    });
+    };
+
+    if (sourceFilter) {
+      for (const [key, value] of Object.entries(sourceFilter)) {
+        // 値を文字列化（JSONBに数値が入っている場合の対策）
+        const raw = String(value ?? '');
+        if (!raw) continue;
+
+        // 値からコード部分を抽出（"0161 生鮮食品を除く総合" → "0161"）
+        // 英数字を一律抽出（数字+英字のコード「01A」にも対応）
+        const codeMatch = raw.match(/^([A-Za-z0-9]+)/);
+        const code = codeMatch ? codeMatch[1] : raw;
+
+        // キー名を API パラメータ名に変換
+        if (key === 'tab') {
+          apiParams.cdTab = code;
+        } else if (key === 'area') {
+          apiParams.cdArea = code;
+        } else if (key.startsWith('cat')) {
+          // cat01 → cdCat01, cat02 → cdCat02, etc.
+          const catNum = key.replace('cat', '');
+          apiParams[`cdCat${catNum}`] = code;
+        }
+      }
+    }
+
+    const response = await this.request('/json/getStatsData', apiParams);
 
     const values = response.GET_STATS_DATA?.STATISTICAL_DATA?.DATA_INF?.VALUE;
     if (!values || values.length === 0) {
