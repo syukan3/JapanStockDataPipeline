@@ -38,8 +38,22 @@ Supabase (PostgreSQL)
 | `financial_disclosure` | 財務サマリー (~50カラム) | 日次 | 空文字→null 自動変換 |
 | `earnings_calendar` | 決算発表予定 | 日次 | 翌営業日分を先行取得 |
 | `investor_type_trading` | 投資部門別売買動向 | 週次 | `published_date` をPKに含め訂正版を別レコード保存 |
-| `macro_indicator_daily` | マクロ経済指標日次 | 日次 | FRED/e-Stat から 16 系列を統一フォーマットで蓄積 |
+| `macro_indicator_daily` | マクロ経済指標日次 | 日次 | FRED/e-Stat から 26 系列を統一フォーマットで蓄積 |
 | `macro_series_metadata` | マクロ系列メタデータ | - | 各系列の更新管理・カテゴリ情報 |
+
+### スクリーニング結果 (scouter)
+
+| テーブル | 説明 | 更新頻度 |
+|---------|------|---------|
+| `macro_regime` | マクロ環境レジーム判定 | 日次 |
+| `macro_ai_evaluations` | マクロAI定性評価（Gemini 3 Flash） | 日次 |
+| `high_dividend_screening` | 高配当株スクリーニング結果 | 日次 |
+
+### RPC 関数 (jquants_core)
+
+| 関数名 | 説明 |
+|--------|------|
+| `get_latest_macro_indicators(p_series_ids, p_eval_date)` | 指定系列の最新指標値を一括取得（DISTINCT ON使用、N+1問題解消） |
 
 ### ジョブ管理 (jquants_ingest)
 
@@ -200,7 +214,7 @@ src/
 │   ├── notification/         # メール通知 (Resend)
 │   └── utils/                # バッチ処理, 日付, リトライ, ロガー
 ├── tests/                    # ユニットテスト (15ファイル, 270ケース)
-supabase/migrations/          # DB マイグレーション (24ファイル)
+supabase/migrations/          # DB マイグレーション (33ファイル)
 scripts/
 ├── seed/                     # 初期データ投入 CLI
 └── cron/                     # Cron 直接実行スクリプト (cron-d-direct.ts)
