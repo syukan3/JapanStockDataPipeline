@@ -47,6 +47,20 @@ export default defineConfig({
         // notification
         'src/lib/notification/email.ts',
         'src/lib/notification/templates.ts',
+        // cron handlers
+        'src/lib/cron/catch-up.ts',
+        'src/lib/cron/handlers/cron-a.ts',
+        'src/lib/cron/handlers/cron-b.ts',
+        'src/lib/cron/handlers/cron-c.ts',
+        'src/lib/cron/handlers/cron-a-chunk.ts',
+        'src/lib/cron/handlers/macro.ts',
+        // jquants endpoints
+        'src/lib/jquants/endpoints/equity-master.ts',
+        'src/lib/jquants/endpoints/equity-bars-daily.ts',
+        // external API clients
+        'src/lib/fred/client.ts',
+        'src/lib/fred/series-config.ts',
+        'src/lib/estat/client.ts',
       ],
       thresholds: {
         statements: 80,
