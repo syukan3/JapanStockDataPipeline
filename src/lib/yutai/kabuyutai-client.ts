@@ -19,8 +19,8 @@ const MONTH_NAMES = [
   'july', 'august', 'september', 'october', 'november', 'december',
 ];
 
-/** リクエスト間隔（ms）: 5req/min = 12秒間隔 */
-const REQUEST_INTERVAL_MS = 12_000;
+/** リクエスト間隔（ms）: 静的ページ取得なので3秒間隔で十分 */
+const REQUEST_INTERVAL_MS = 3_000;
 
 /** ページネーション上限（安全弁） */
 const MAX_PAGES = 20;
