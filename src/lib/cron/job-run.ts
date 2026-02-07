@@ -10,7 +10,7 @@ import { createLogger } from '../utils/logger';
 const logger = createLogger({ module: 'job-run' });
 
 export type JobStatus = 'running' | 'success' | 'failed';
-export type JobName = 'cron_a' | 'cron_b' | 'cron_c' | 'cron-d-macro';
+export type JobName = 'cron_a' | 'cron_b' | 'cron_c' | 'cron-d-macro' | 'cron-e-yutai' | 'scouter-yutai-cross';
 
 export interface JobRunRecord {
   run_id: string;
