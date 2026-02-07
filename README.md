@@ -12,15 +12,18 @@ Vercel (Next.js API Routes) / GitHub Actions Runner
   ├─ Cron A: 日次確定データ (5データセット × 逐次)
   ├─ Cron B: 決算発表予定
   ├─ Cron C: 投資部門別売買 + 整合性チェック
-  └─ Cron D: マクロ経済指標 (FRED/e-Stat)
+  ├─ Cron D: マクロ経済指標 (FRED/e-Stat)
+  └─ Cron E: 優待情報 + 信用売り在庫 (kabuyutai.com/eスマート証券CSV)
   │
   ├─ J-Quants API V2 ──→ トークンバケット制御 (60req/min)
   ├─ FRED API ─────────→ 米国経済指標 (14系列)
   ├─ e-Stat API ───────→ 日本経済指標 (2系列)
+  ├─ kabuyutai.com ────→ 株主優待情報 (12ヶ月分)
+  ├─ eスマート証券CSV ──→ 一般信用売り在庫
   │                       指数バックオフリトライ (500ms〜32s + jitter)
   ▼
 Supabase (PostgreSQL)
-  ├─ jquants_core:   9テーブル (ビジネスデータ, RLS保護)
+  ├─ jquants_core:   11テーブル (ビジネスデータ, RLS保護)
   ├─ jquants_ingest: 4テーブル + 5ビュー (ジョブ管理・監視)
   └─ RLS + 最小権限: anon排除, authenticated=SELECT, service_role=ALL
 ```
@@ -40,6 +43,8 @@ Supabase (PostgreSQL)
 | `investor_type_trading` | 投資部門別売買動向 | 週次 | `published_date` をPKに含め訂正版を別レコード保存 |
 | `macro_indicator_daily` | マクロ経済指標日次 | 日次 | FRED/e-Stat から 26 系列を統一フォーマットで蓄積 |
 | `macro_series_metadata` | マクロ系列メタデータ | - | 各系列の更新管理・カテゴリ情報 |
+| `yutai_benefit` | 株主優待情報マスタ (kabuyutai.com) | 日次 | 銘柄コード×最低株数×確定月で一意 |
+| `margin_inventory` | 一般信用売り在庫 (eスマート証券/kabu STATION) | 日次 | 銘柄コード×証券会社×日付×信用区分で一意 |
 
 ### スクリーニング結果 (scouter)
 
@@ -48,6 +53,7 @@ Supabase (PostgreSQL)
 | `macro_regime` | マクロ環境レジーム判定 | 日次 |
 | `macro_ai_evaluations` | マクロAI定性評価（Gemini 3 Flash） | 日次 |
 | `high_dividend_screening` | 高配当株スクリーニング結果 | 日次 |
+| `yutai_cross_screening` | 優待クロススクリーニング結果 | 日次 |
 
 ### RPC 関数 (jquants_core)
 
@@ -142,8 +148,9 @@ jquants_ingest (管理用)
 | **B** | 19:20 | 決算発表カレンダー | 翌営業日分を先行取得 |
 | **C** | 12:10 | 投資部門別売買 + 整合性チェック | スライディングウィンドウ (60日) + 並列実行 |
 | **D** | 07:00 (月〜金) | マクロ経済指標 (FRED/e-Stat) | GitHub Actions 直接実行 (Vercel 経由せず) |
+| **E** | 16:30 | 優待情報 + 信用売り在庫 (kabuyutai.com/eスマート証券CSV) | GitHub Actions 直接実行、3秒間隔クロール |
 
-GitHub Actions が Vercel API Routes を curl で順次呼び出し (Cron A/B/C)。Cron D は GitHub Actions Runner で直接実行。レート制限はトークンバケット方式 (最小間隔 1000ms) で制御。
+GitHub Actions が Vercel API Routes を curl で順次呼び出し (Cron A/B/C)。Cron D/E は GitHub Actions Runner で直接実行。レート制限はトークンバケット方式 (最小間隔 1000ms) で制御。
 
 ## 技術スタック
 
@@ -151,7 +158,7 @@ GitHub Actions が Vercel API Routes を curl で順次呼び出し (Cron A/B/C)
 |---------|------|
 | フレームワーク | Next.js 16 (Turbopack) / React 19 / TypeScript 5.7 |
 | データベース | Supabase (PostgreSQL) |
-| データソース | J-Quants API V2 (Light プラン: 60req/min), FRED API, e-Stat API |
+| データソース | J-Quants API V2 (Light プラン: 60req/min), FRED API, e-Stat API, kabuyutai.com, eスマート証券CSV |
 | スケジューラ | GitHub Actions (Cron) |
 | デプロイ | Vercel (Hobby プラン) |
 | 通知 | Resend (メール) |
@@ -204,8 +211,12 @@ src/
 │   │   ├── types.ts          # e-Stat 型定義
 │   │   └── series-config.ts  # 取得対象系列設定 (2系列)
 │   ├── supabase/             # Admin / Server クライアント (接続キャッシュ)
+│   ├── yutai/
+│   │   ├── kabuyutai-client.ts # kabuyutai.com スクレイパー
+│   │   ├── kabu-csv-client.ts  # eスマート証券 CSV パーサー
+│   │   └── types.ts            # 優待関連型定義
 │   ├── cron/
-│   │   ├── handlers/         # Cron A/B/C/D ハンドラー
+│   │   ├── handlers/         # Cron A/B/C/D/E ハンドラー
 │   │   ├── catch-up.ts       # 欠損データ自動検知・補完
 │   │   ├── job-run.ts        # 実行ログ管理
 │   │   ├── job-lock.ts       # テーブルベースロック
@@ -214,10 +225,10 @@ src/
 │   ├── notification/         # メール通知 (Resend)
 │   └── utils/                # バッチ処理, 日付, リトライ, ロガー
 ├── tests/                    # ユニットテスト (15ファイル, 270ケース)
-supabase/migrations/          # DB マイグレーション (33ファイル)
+supabase/migrations/          # DB マイグレーション (38ファイル)
 scripts/
 ├── seed/                     # 初期データ投入 CLI
-└── cron/                     # Cron 直接実行スクリプト (cron-d-direct.ts)
+└── cron/                     # Cron 直接実行スクリプト (cron-d-direct.ts, cron-e-direct.ts)
 docs/                         # 運用・アーキテクチャドキュメント
 ```
 
