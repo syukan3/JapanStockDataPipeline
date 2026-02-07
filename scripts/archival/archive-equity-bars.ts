@@ -86,8 +86,8 @@ function getManagementApiConfig(): { projectRef: string; accessToken: string } {
   };
 }
 
-/** Execute SQL via Supabase Management API */
-async function executeSql(sql: string): Promise<{ rows: Record<string, unknown>[] }> {
+/** Execute SQL via Supabase Management API (returns array of row objects) */
+async function executeSql(sql: string): Promise<Record<string, unknown>[]> {
   const { projectRef, accessToken } = getManagementApiConfig();
   const url = `https://api.supabase.com/v1/projects/${projectRef}/database/query`;
 
@@ -105,7 +105,7 @@ async function executeSql(sql: string): Promise<{ rows: Record<string, unknown>[
     throw new Error(`Management API error (${response.status}): ${body}`);
   }
 
-  return response.json() as Promise<{ rows: Record<string, unknown>[] }>;
+  return response.json() as Promise<Record<string, unknown>[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ async function getDbSizeMb(): Promise<number> {
   const result = await executeSql(
     `SELECT pg_database_size(current_database()) AS size_bytes`
   );
-  const sizeBytes = Number(result.rows[0]?.size_bytes ?? 0);
+  const sizeBytes = Number(result[0]?.size_bytes ?? 0);
   return sizeBytes / (1024 * 1024);
 }
 
@@ -139,7 +139,7 @@ async function getDataRange(): Promise<DataRange | null> {
      FROM jquants_core.${TABLE}`
   );
 
-  const row = result.rows[0];
+  const row = result[0];
   if (!row || !row.min_date || !row.max_date) {
     return null; // テーブルが空
   }
@@ -170,11 +170,11 @@ async function getArchiveCutoffDate(
      LIMIT 1`
   );
 
-  if (!result.rows[0]) {
+  if (!result[0]) {
     throw new Error(`Not enough trading days to archive ${archiveDays} days`);
   }
 
-  return String(result.rows[0].trade_date);
+  return String(result[0].trade_date);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +402,7 @@ async function main(): Promise<void> {
     const countResult = await executeSql(
       `SELECT COUNT(*) AS cnt FROM jquants_core.${TABLE} WHERE trade_date <= '${cutoffDate}'`
     );
-    const dbRowCount = Number(countResult.rows[0]?.cnt ?? 0);
+    const dbRowCount = Number(countResult[0]?.cnt ?? 0);
 
     if (dbRowCount !== totalRows) {
       throw new Error(
@@ -417,7 +417,7 @@ async function main(): Promise<void> {
     const deleteResult = await executeSql(
       `DELETE FROM jquants_core.${TABLE} WHERE trade_date <= '${cutoffDate}'`
     );
-    logger.info('Delete completed', deleteResult);
+    logger.info('Delete completed', { rows: deleteResult.length });
 
     // VACUUM FULL で実サイズを回収
     logger.info('Running VACUUM FULL (this may take a while)...');
