@@ -44,3 +44,9 @@ export {
   type CronDRequest,
   type CronDResult,
 } from './macro';
+
+// Cron E: 優待データ同期
+export {
+  handleCronE,
+} from './yutai';
+export { CRON_E_SOURCES, type CronESource, type CronEResult } from '../../yutai/types';

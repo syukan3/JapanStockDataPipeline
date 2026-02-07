@@ -1,0 +1,36 @@
+name: Cron E - Yutai Data Sync
+on:
+  schedule:
+    - cron: '30 7 * * *'  # JST 16:30（毎日、市場閉場後）
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Data source'
+        default: 'all'
+        type: choice
+        options: ['all', 'kabuyutai', 'kabu_csv']
+
+concurrency:
+  group: cron-e
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Sync Yutai Data
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: |
+          SOURCE="${{ github.event.inputs.source || 'all' }}"
+          npx tsx scripts/cron/cron-e-direct.ts --source="${SOURCE}"
