@@ -12,10 +12,18 @@ import type { YutaiBenefit } from './types';
 
 const logger = createLogger({ module: 'kabuyutai-client' });
 
-const BASE_URL = 'https://www.kabuyutai.com/kobetu';
+const BASE_URL = 'https://www.kabuyutai.com/yutai';
+
+const MONTH_NAMES = [
+  '', 'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+];
 
 /** リクエスト間隔（ms）: 5req/min = 12秒間隔 */
 const REQUEST_INTERVAL_MS = 12_000;
+
+/** ページネーション上限（安全弁） */
+const MAX_PAGES = 20;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,70 +67,57 @@ export function estimateCategory(content: string): string | null {
 
 /**
  * HTMLテキストから銘柄コード（4桁 or 5桁）を抽出
+ * 全角括弧 （1234） または半角括弧 (1234) に対応
  */
 function extractLocalCode(text: string): string | null {
-  const match = text.match(/(\d{4,5})/);
+  const match = text.match(/[（(](\d{4,5})[）)]/);
   if (!match) return null;
   const code = match[1];
-  // 4桁なら末尾0を付けて5桁に
   return code.length === 4 ? code + '0' : code;
 }
 
 /**
- * HTML行から優待レコードをパース
+ * HTML から優待レコードをパース
  *
- * kabuyutai.com の個別ページ（/kobetu/{code}.html）をパース
- * ページ構造: テーブル行に企業名、優待内容、必要株数、権利確定月が含まれる
+ * kabuyutai.com の月別一覧ページ（/yutai/{month}.html）をパース
+ * ページ構造: <div class="table_tr"> ブロックに企業名・コード・優待内容が含まれる
  */
 export function parseYutaiListPage(html: string, month: number): YutaiBenefit[] {
   const results: YutaiBenefit[] = [];
 
-  // テーブル行を抽出: <tr>...</tr> のパターン
-  const trPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let trMatch: RegExpExecArray | null;
+  // <div class="table_tr"> ブロックを抽出
+  const blockPattern = /<div\s+class="table_tr">([\s\S]*?)(?=<div\s+class="table_tr">|<div\s+class="pagination"|$)/gi;
+  let blockMatch: RegExpExecArray | null;
 
-  while ((trMatch = trPattern.exec(html)) !== null) {
-    const rowHtml = trMatch[1];
+  while ((blockMatch = blockPattern.exec(html)) !== null) {
+    const block = blockMatch[1];
 
-    // <td> セルを抽出
-    const tdPattern = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    const cells: string[] = [];
-    let tdMatch: RegExpExecArray | null;
-    while ((tdMatch = tdPattern.exec(rowHtml)) !== null) {
-      // HTMLタグを除去してテキストのみ取得
-      cells.push(tdMatch[1].replace(/<[^>]+>/g, '').trim());
-    }
-
-    if (cells.length < 4) continue;
-
-    // 銘柄コード抽出（最初のセルにコードが含まれる）
-    const localCode = extractLocalCode(cells[0]);
+    // 銘柄コード: 「（1234）」パターン
+    const localCode = extractLocalCode(block);
     if (!localCode) continue;
 
-    // 企業名（2番目のセル or コードの横）
-    const companyName = cells[1] || '';
+    // 企業名: <a href="...">企業名</a> から抽出
+    const nameMatch = block.match(/<a\s+href="[^"]*">([^<]+)<\/a>/);
+    const companyName = nameMatch ? nameMatch[1].trim() : '';
     if (!companyName) continue;
 
-    // 必要株数を探す
-    let minShares = 100; // デフォルト
-    for (const cell of cells) {
-      const sharesMatch = cell.match(/(\d{1,3}(?:,\d{3})*)\s*株/);
-      if (sharesMatch) {
-        minShares = parseInt(sharesMatch[1].replace(/,/g, ''), 10);
-        break;
-      }
-    }
-
-    // 優待内容（最も長いセルを使用、コード・企業名以外）
-    const contentCandidates = cells.slice(2).filter((c) => c.length > 3);
-    const benefitContent = contentCandidates.sort((a, b) => b.length - a.length)[0] || '';
+    // 優待内容: 【優待内容】の後のテキスト
+    const benefitMatch = block.match(/【優待内容】([^<]*)/);
+    const benefitContent = benefitMatch ? benefitMatch[1].trim() : '';
     if (!benefitContent) continue;
+
+    // 必要株数: 優待内容から「○○株」を探す、なければデフォルト100
+    let minShares = 100;
+    const sharesMatch = block.match(/(\d{1,3}(?:,\d{3})*)\s*株/);
+    if (sharesMatch) {
+      minShares = parseInt(sharesMatch[1].replace(/,/g, ''), 10);
+    }
 
     results.push({
       local_code: localCode,
-      company_name: companyName.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+      company_name: companyName.replace(/&amp;/g, '&'),
       min_shares: minShares,
-      benefit_content: benefitContent.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+      benefit_content: benefitContent.replace(/&amp;/g, '&'),
       benefit_value: estimateBenefitValue(benefitContent),
       record_month: month,
       record_day: 'end',
@@ -134,29 +129,60 @@ export function parseYutaiListPage(html: string, month: number): YutaiBenefit[] 
 }
 
 /**
- * kabuyutai.com から指定月の優待一覧を取得
+ * ページネーションの最大ページ数を検出
+ */
+export function detectMaxPage(html: string): number {
+  let maxPage = 1;
+  const pagePattern = /href="[a-z]+(\d+)\.html"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = pagePattern.exec(html)) !== null) {
+    const page = parseInt(m[1], 10);
+    if (page > maxPage) maxPage = page;
+  }
+  return maxPage;
+}
+
+/**
+ * 単一ページを取得
+ */
+async function fetchPage(url: string): Promise<string> {
+  const response = await fetchWithRetry(url, {
+    headers: {
+      'User-Agent': 'JapanStockDataPipeline/1.0 (personal use)',
+      Accept: 'text/html',
+    },
+  }, {
+    maxRetries: 2,
+    baseDelayMs: 5000,
+  });
+  return response.text();
+}
+
+/**
+ * kabuyutai.com から指定月の優待一覧を取得（全ページ巡回）
  */
 export async function fetchYutaiBenefitsForMonth(month: number): Promise<YutaiBenefit[]> {
-  const url = `${BASE_URL}/${month}gatsu.html`;
+  const monthName = MONTH_NAMES[month];
+  if (!monthName) throw new Error(`Invalid month: ${month}`);
 
-  logger.info('Fetching kabuyutai page', { month, url });
+  const firstUrl = `${BASE_URL}/${monthName}.html`;
+  logger.info('Fetching kabuyutai page', { month, url: firstUrl });
 
   try {
-    const response = await fetchWithRetry(url, {
-      headers: {
-        'User-Agent': 'JapanStockDataPipeline/1.0 (personal use)',
-        Accept: 'text/html',
-      },
-    }, {
-      maxRetries: 2,
-      baseDelayMs: 5000,
-    });
+    const firstHtml = await fetchPage(firstUrl);
+    const allBenefits = parseYutaiListPage(firstHtml, month);
+    const maxPage = detectMaxPage(firstHtml);
 
-    const html = await response.text();
-    const benefits = parseYutaiListPage(html, month);
+    for (let page = 2; page <= Math.min(maxPage, MAX_PAGES); page++) {
+      await sleep(REQUEST_INTERVAL_MS);
+      const pageUrl = `${BASE_URL}/${monthName}${page}.html`;
+      logger.info('Fetching kabuyutai page', { month, page, url: pageUrl });
+      const pageHtml = await fetchPage(pageUrl);
+      allBenefits.push(...parseYutaiListPage(pageHtml, month));
+    }
 
-    logger.info('Parsed kabuyutai benefits', { month, count: benefits.length });
-    return benefits;
+    logger.info('Parsed kabuyutai benefits', { month, pages: maxPage, count: allBenefits.length });
+    return allBenefits;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.error('Failed to fetch kabuyutai page', { month, error: msg });
