@@ -11,10 +11,14 @@
   - SQLクエリ作成、スキーマ設計、インデックス最適化、RLS設定
 - [Supabase Data Check](.claude/skills/supabase-data-check/SKILL.md)
   - データ存在確認、最新データ日チェック、Cron A結果確認
+- [Supabase DB Capacity](.claude/skills/supabase-db-capacity/SKILL.md)
+  - DB容量確認、テーブル別サイズ、Free Plan使用率チェック
 
 ### Ops
 - [Cron Troubleshoot](.claude/skills/cron-troubleshoot/SKILL.md)
   - Cron障害調査、エラーログ解析、データ欠損特定、バックフィル
+- [GH Actions Verify](.claude/skills/gh-actions-verify/SKILL.md)
+  - GitHub Actionsワークフローの最短テスト実行・動作確認
 
 ### Frontend
 - [Vercel React Best Practices](.claude/skills/react-best-practices/SKILL.md)
