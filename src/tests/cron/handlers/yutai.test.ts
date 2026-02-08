@@ -43,6 +43,7 @@ vi.mock('@/lib/utils/logger', () => ({
 }));
 
 import { handleCronE } from '@/lib/cron/handlers/yutai';
+import { NonRetryableError } from '@/lib/utils/retry';
 
 const sampleBenefits = [
   {
@@ -188,6 +189,45 @@ describe('handleCronE', () => {
 
     expect(result.success).toBe(false);
     expect(result.errors).toContain('fetch error');
+  });
+
+  it('CSV 404 (非営業日) → 警告のみでジョブ成功', async () => {
+    mockFetchAllYutaiBenefits.mockResolvedValue(sampleBenefits);
+    mockFetchMarginInventoryCsv.mockRejectedValue(
+      new NonRetryableError('HTTP 404: Not Found', 404),
+    );
+
+    const result = await handleCronE('all', 'test-run-404');
+
+    expect(result.success).toBe(true);
+    expect(result.benefitsUpserted).toBe(2);
+    expect(result.inventoryUpserted).toBe(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('CSV 404 (source=kabu_csv のみ) → 成功', async () => {
+    mockFetchMarginInventoryCsv.mockRejectedValue(
+      new NonRetryableError('HTTP 404: Not Found', 404),
+    );
+
+    const result = await handleCronE('kabu_csv', 'test-run-404-only');
+
+    expect(result.success).toBe(true);
+    expect(result.inventoryUpserted).toBe(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('CSV 500エラー → 従来通り失敗', async () => {
+    mockFetchAllYutaiBenefits.mockResolvedValue(sampleBenefits);
+    mockFetchMarginInventoryCsv.mockRejectedValue(
+      new NonRetryableError('HTTP 500: Internal Server Error', 500),
+    );
+    mockSendJobFailureEmail.mockResolvedValue(undefined);
+
+    const result = await handleCronE('all', 'test-run-500');
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toContain('HTTP 500: Internal Server Error');
   });
 
   it('sourceフィールドが結果に含まれる', async () => {

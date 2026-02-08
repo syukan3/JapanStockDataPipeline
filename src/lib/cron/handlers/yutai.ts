@@ -10,6 +10,7 @@ import { createAdminClient } from '../../supabase/admin';
 import { sendJobFailureEmail } from '../../notification/email';
 import { fetchAllYutaiBenefits } from '../../yutai/kabuyutai-client';
 import { fetchMarginInventoryCsv } from '../../yutai/kabu-csv-client';
+import { NonRetryableError } from '../../utils/retry';
 import type { CronESource, CronEResult, YutaiBenefit, MarginInventory } from '../../yutai/types';
 
 const logger = createLogger({ module: 'cron-e-yutai' });
@@ -163,19 +164,31 @@ export async function handleCronE(
       const inventoryDate = getJSTDateString();
       logger.info('Fetching margin inventory CSV', { ...logContext, inventoryDate });
 
-      const inventory = await fetchMarginInventoryCsv(inventoryDate);
+      try {
+        const inventory = await fetchMarginInventoryCsv(inventoryDate);
 
-      if (inventory.length > 0) {
-        const { upserted, errors } = await upsertInventory(inventory, logContext);
-        result.inventoryUpserted = upserted;
-        result.errors.push(...errors);
+        if (inventory.length > 0) {
+          const { upserted, errors } = await upsertInventory(inventory, logContext);
+          result.inventoryUpserted = upserted;
+          result.errors.push(...errors);
+        }
+
+        logger.info('Margin inventory processed', {
+          ...logContext,
+          fetched: inventory.length,
+          upserted: result.inventoryUpserted,
+        });
+      } catch (csvError) {
+        // 404 は休日/休場日でCSV未公開のケース — 警告のみでジョブ失敗にしない
+        if (csvError instanceof NonRetryableError && csvError.statusCode === 404) {
+          logger.warn('Margin inventory CSV not available (likely non-trading day)', {
+            ...logContext,
+            inventoryDate,
+          });
+        } else {
+          throw csvError;
+        }
       }
-
-      logger.info('Margin inventory processed', {
-        ...logContext,
-        fetched: inventory.length,
-        upserted: result.inventoryUpserted,
-      });
     }
 
     if (result.errors.length > 0) {
