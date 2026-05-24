@@ -1,0 +1,28 @@
+# Keep-Alive
+# GitHubは60日間リポジトリ非活動でscheduled workflowを自動無効化するため、
+# 毎月1日に空コミットをpushしてカウンタをリセットする。
+
+name: Keep-Alive
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # 毎月1日 00:00 UTC (JST 09:00)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Push empty commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keep-alive (prevent scheduled workflow auto-disable)"
+          git push
