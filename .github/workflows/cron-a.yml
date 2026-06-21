@@ -68,12 +68,25 @@ jobs:
             --fail --silent --show-error --max-time 300
 
       - name: Sync Equity Master (direct)
+        id: equity_master
         if: always() && steps.calendar.outcome == 'success'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/cron-a-direct.ts equity_master
+
+      # 生データ(株価/財務/マスタ)確定後に派生メトリクスを再計算
+      - name: Refresh factor metrics (analytics.stock_metrics)
+        if: always() && steps.equity_master.outcome == 'success'
+        run: |
+          curl -X POST "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}/rest/v1/rpc/refresh_stock_metrics" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Profile: analytics" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --fail --silent --show-error --max-time 300
 
       - name: Notify on failure
         if: failure()
