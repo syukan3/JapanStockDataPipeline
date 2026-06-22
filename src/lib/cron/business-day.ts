@@ -140,6 +140,41 @@ export async function getBusinessDays(
 }
 
 /**
+ * 指定期間の営業日リストを取得（DBエラー時は例外を投げる厳格版）
+ *
+ * @description getBusinessDays はエラー時に空配列を返すため、
+ * 「DB読取失敗」と「対象期間に営業日が無い」を呼び出し側で区別できない。
+ * バッチ取り込みのように「静かなスキップ」が欠損につながる経路ではこちらを使う。
+ *
+ * @param supabase Supabase クライアント
+ * @param fromDate 開始日（含む）
+ * @param toDate 終了日（含む）
+ * @throws DB読取に失敗した場合
+ */
+export async function getBusinessDaysOrThrow(
+  supabase: SupabaseClient,
+  fromDate: string,
+  toDate: string
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('trading_calendar')
+    .select('calendar_date, hol_div')
+    .gte('calendar_date', fromDate)
+    .lte('calendar_date', toDate)
+    .order('calendar_date', { ascending: true });
+
+  if (error || !data) {
+    throw new Error(
+      `Failed to read business days from trading_calendar [${fromDate}..${toDate}]: ${error?.message ?? 'no data'}`
+    );
+  }
+
+  return data
+    .filter((row) => isBusinessDay(row.hol_div))
+    .map((row) => row.calendar_date);
+}
+
+/**
  * N営業日前の日付を取得
  *
  * @param supabase Supabase クライアント

@@ -50,23 +50,22 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/cron-a-direct.ts equity_bars
 
-      - name: Trigger Cron A - TOPIX
+      - name: Sync TOPIX (direct)
         if: always() && steps.calendar.outcome == 'success'
-        run: |
-          curl -X POST "${{ secrets.VERCEL_URL }}/api/cron/jquants/a" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json" \
-            -d '{"dataset": "topix"}' \
-            --fail --silent --show-error --max-time 120
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/cron-a-direct.ts topix
 
-      - name: Trigger Cron A - Financial
+      - name: Sync Financial (direct)
+        id: financial
         if: always() && steps.calendar.outcome == 'success'
-        run: |
-          curl -X POST "${{ secrets.VERCEL_URL }}/api/cron/jquants/a" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json" \
-            -d '{"dataset": "financial"}' \
-            --fail --silent --show-error --max-time 300
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/cron-a-direct.ts financial
 
       - name: Sync Equity Master (direct)
         id: equity_master
@@ -78,9 +77,10 @@ jobs:
         run: npx tsx scripts/cron/cron-a-direct.ts equity_master
 
       # 生データ(株価/財務/マスタ)確定後に派生メトリクスを再計算
-      # 株価(equity_bars)とマスタ(equity_master)の両方が成功した時のみ（部分株価での再計算を防ぐ）
+      # refresh_stock_metrics は equity_bar_daily / equity_master / financial_disclosure を参照するため、
+      # 3つ全ての同期が成功した時のみ実行する（部分株価や stale な財務での再計算・公開を防ぐ）。
       - name: Refresh factor metrics (analytics.stock_metrics)
-        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success'
+        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success' && steps.financial.outcome == 'success'
         run: |
           curl -X POST "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}/rest/v1/rpc/refresh_stock_metrics" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
