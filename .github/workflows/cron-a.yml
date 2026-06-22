@@ -42,6 +42,7 @@ jobs:
             --fail --silent --show-error --max-time 120
 
       - name: Sync Equity Bars (direct)
+        id: equity_bars
         if: always() && steps.calendar.outcome == 'success'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
@@ -77,8 +78,9 @@ jobs:
         run: npx tsx scripts/cron/cron-a-direct.ts equity_master
 
       # 生データ(株価/財務/マスタ)確定後に派生メトリクスを再計算
+      # 株価(equity_bars)とマスタ(equity_master)の両方が成功した時のみ（部分株価での再計算を防ぐ）
       - name: Refresh factor metrics (analytics.stock_metrics)
-        if: always() && steps.equity_master.outcome == 'success'
+        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success'
         run: |
           curl -X POST "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}/rest/v1/rpc/refresh_stock_metrics" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
@@ -87,6 +89,17 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{}' \
             --fail --silent --show-error --max-time 300
+
+      # テクニカル指標スナップショットを再計算（analytics.technical_metrics）。
+      # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま（誤アラート防止）。
+      # 株価(equity_bars)とマスタ(equity_master)の両方が成功した時のみ実行（古い/部分株価での公開を防ぐ）。
+      - name: Refresh technical metrics (analytics.technical_metrics)
+        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success'
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/refresh-technical.ts
 
       - name: Notify on failure
         if: failure()
