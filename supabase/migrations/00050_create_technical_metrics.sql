@@ -30,8 +30,11 @@ insert into analytics.technical_publication (id, published_as_of_date)
   on conflict (id) do nothing;
 
 alter table analytics.technical_publication enable row level security;
+-- 冪等化: 既存環境(部分適用)でも再適用できるよう policy を作り直す（CREATE POLICY に IF NOT EXISTS が無い）。
+drop policy if exists "authenticated_select" on analytics.technical_publication;
 create policy "authenticated_select"
   on analytics.technical_publication for select to authenticated using (true);
+drop policy if exists "service_role_all" on analytics.technical_publication;
 create policy "service_role_all"
   on analytics.technical_publication for all to service_role using (true) with check (true);
 grant select on analytics.technical_publication to authenticated;
@@ -95,6 +98,8 @@ create index if not exists idx_technical_metrics_date
 --      service_role(バッチ)は RLS 迂回で全行 read/write 可。
 alter table analytics.technical_metrics enable row level security;
 
+-- 冪等化: 既存環境でも再適用できるよう policy を作り直す。
+drop policy if exists "authenticated_select_published" on analytics.technical_metrics;
 create policy "authenticated_select_published"
   on analytics.technical_metrics
   for select to authenticated
@@ -102,6 +107,7 @@ create policy "authenticated_select_published"
     as_of_date = (select published_as_of_date from analytics.technical_publication where id)
   );
 
+drop policy if exists "service_role_all" on analytics.technical_metrics;
 create policy "service_role_all"
   on analytics.technical_metrics
   for all to service_role using (true) with check (true);
