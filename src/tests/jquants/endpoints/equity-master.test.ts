@@ -302,12 +302,11 @@ describe('jquants/endpoints/equity-master.ts', () => {
       const existingRecords = [
         {
           id: 1,
-          local_code: '72030',
           ...toEquityMasterSCDRecord(createMockMasterItem()),
         },
         {
           id: 2,
-          local_code: '99990', // APIに存在しない → 上場廃止
+          // local_code '99990'（createMockMasterItem の Code 由来）は API に存在しない → 上場廃止
           ...toEquityMasterSCDRecord(createMockMasterItem({ Code: '99990' })),
         },
       ];
@@ -344,7 +343,6 @@ describe('jquants/endpoints/equity-master.ts', () => {
 
       const largeData = codes.map((code, i) => ({
         id: i + 1,
-        local_code: code,
         ...toEquityMasterSCDRecord(createMockMasterItem({ Code: code })),
       }));
 
@@ -385,7 +383,6 @@ describe('jquants/endpoints/equity-master.ts', () => {
 
       const existingRecord = {
         id: 1,
-        local_code: '72030',
         ...toEquityMasterSCDRecord(createMockMasterItem()),
       };
 
