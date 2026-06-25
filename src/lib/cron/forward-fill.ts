@@ -55,7 +55,14 @@ const DEFAULT_MAX_DAYS_PER_RUN = 20;
  * 実データテーブルの最新日付を取得（YYYY-MM-DD）。データが無ければ null。
  *
  * @description nullable な日付カラム（例: financial_disclosure.disclosed_date）でも
- * watermark が null に化けないよう、null 行を除外し NULLS LAST で降順取得する。
+ * watermark が null に化けないよう、`.not(... is null)` で null 行を除外したうえで降順1件を取る。
+ *
+ * NOTE(perf): 並び替えは `DESC` のみで `NULLS LAST` は付けない。デフォルトの btree
+ * インデックス (col ASC NULLS LAST) は後方スキャンで `DESC NULLS FIRST` を満たせるため、
+ * `ORDER BY col DESC LIMIT 1` はインデックスのみで即時に解決できる。一方
+ * `DESC NULLS LAST` を要求するとインデックス順序と一致せずフルスキャン+ソートに退化し、
+ * 大きいテーブル（equity_bar_daily は ~134万行）では statement timeout で失敗する。
+ * null は上の `.not(... is null)` で既に除外済みなので `NULLS LAST` は冗長。
  */
 export async function getMaxDataDate(
   supabaseCore: SupabaseClient,
@@ -66,7 +73,7 @@ export async function getMaxDataDate(
     .from(table)
     .select(dateColumn)
     .not(dateColumn, 'is', null)
-    .order(dateColumn, { ascending: false, nullsFirst: false })
+    .order(dateColumn, { ascending: false })
     .limit(1);
 
   if (error) {
