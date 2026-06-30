@@ -3,11 +3,18 @@
 # 対象: カレンダー、株価、TOPIX、財務、銘柄マスタ
 
 name: Cron A - Daily Data Sync
+run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
 
 on:
   schedule:
     - cron: '40 9 * * *'  # JST 18:40
-  workflow_dispatch:       # 手動実行
+  workflow_dispatch:       # 手動実行 / pg_cron からの外部トリガー
+    inputs:
+      dispatch_label:
+        description: '外部トリガー識別ラベル（pg_cron発火時に付与・二重実行防止用）'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: cron-a

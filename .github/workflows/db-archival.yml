@@ -3,6 +3,7 @@
 # DB容量が閾値を超えた場合、最古の半年分をStorageにアーカイブし削除
 
 name: "DB Archival: Equity Bars"
+run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
 
 on:
   schedule:
@@ -13,6 +14,11 @@ on:
         description: 'アーカイブ閾値 (MB)'
         type: number
         default: 450
+      dispatch_label:
+        description: '外部トリガー識別ラベル（pg_cron発火時に付与・二重実行防止用）'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: db-archival

@@ -3,11 +3,22 @@
 # スライディングウィンドウ方式で過去60日分を取得
 
 name: Cron C - Investor Types Sync
+run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
 
 on:
   schedule:
     - cron: '10 3 * * *'  # JST 12:10
-  workflow_dispatch:       # 手動実行
+  workflow_dispatch:       # 手動実行 / pg_cron からの外部トリガー
+    inputs:
+      dispatch_label:
+        description: '外部トリガー識別ラベル（pg_cron発火時に付与・二重実行防止用）'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: cron-c
+  cancel-in-progress: false
 
 jobs:
   sync:

@@ -3,6 +3,7 @@
 # 米国市場閉場後のFREDデータ更新タイミングに合わせて実行
 
 name: "Cron D: Macro Data"
+run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
 
 on:
   schedule:
@@ -21,6 +22,11 @@ on:
         description: '過去N日分をバックフィル（0=差分のみ）'
         type: number
         default: 0
+      dispatch_label:
+        description: '外部トリガー識別ラベル（pg_cron発火時に付与・二重実行防止用）'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: cron-d

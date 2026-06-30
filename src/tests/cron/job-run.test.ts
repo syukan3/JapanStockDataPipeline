@@ -89,7 +89,68 @@ describe('cron/job-run.ts', () => {
       );
     });
 
-    it('同一日付で実行済みの場合エラーを返す（冪等性）', async () => {
+    it('同一日付の既存runを再取得してrun_idを返す（再ディスパッチ収束）', async () => {
+      const single = vi.fn()
+        .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key value' } })
+        .mockResolvedValueOnce({ data: { run_id: 'existing-run-id' }, error: null });
+      const updateMock = vi.fn().mockReturnThis();
+      const itemsDeleteEq = vi.fn().mockResolvedValue({ error: null });
+      const jobRunsChain = {
+        insert: vi.fn().mockReturnThis(),
+        update: updateMock,
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single,
+      };
+      const jobRunItemsChain = {
+        delete: vi.fn().mockReturnThis(),
+        eq: itemsDeleteEq,
+      };
+      const mockSupabase = {
+        from: vi.fn((table: string) => (table === 'job_run_items' ? jobRunItemsChain : jobRunsChain)),
+      };
+
+      const result = await startJobRun(mockSupabase as any, {
+        jobName: 'cron_a',
+        targetDate: '2024-01-15',
+      });
+
+      // 既存の失敗/中断行を running に戻して同じ run_id を返す
+      expect(result.runId).toBe('existing-run-id');
+      expect(result.error).toBeUndefined();
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'running', finished_at: null, error_message: null })
+      );
+      // 古い job_run_items はクリアされる
+      expect(itemsDeleteEq).toHaveBeenCalledWith('run_id', 'existing-run-id');
+    });
+
+    it('既存runがsuccess/running（failed以外）なら再取得せず実行済みを返す', async () => {
+      // insert → 23505、update(status=failed条件) → 0件(PGRST116) = 成功/実行中行は巻き戻さない
+      const single = vi.fn()
+        .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key value' } })
+        .mockResolvedValueOnce({ data: null, error: { code: 'PGRST116', message: 'no rows' } });
+      const jobRunsChain = {
+        insert: vi.fn().mockReturnThis(),
+        update: vi.fn().mockReturnThis(),
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single,
+      };
+      const mockSupabase = {
+        from: vi.fn(() => jobRunsChain),
+      };
+
+      const result = await startJobRun(mockSupabase as any, {
+        jobName: 'cron_a',
+        targetDate: '2024-01-15',
+      });
+
+      expect(result.runId).toBe('');
+      expect(result.error).toBe('Job already executed for this target date');
+    });
+
+    it('targetDateなしの23505は再取得せずエラーを返す', async () => {
       const mockSupabase = {
         from: vi.fn(() => ({
           insert: vi.fn().mockReturnThis(),
@@ -102,12 +163,11 @@ describe('cron/job-run.ts', () => {
       };
 
       const result = await startJobRun(mockSupabase as any, {
-        jobName: 'cron_a',
-        targetDate: '2024-01-15',
+        jobName: 'cron_b',
       });
 
       expect(result.runId).toBe('');
-      expect(result.error).toBe('Job already executed for this target date');
+      expect(result.error).toBe('duplicate key value');
     });
 
     it('DBエラーの場合エラーを返す', async () => {

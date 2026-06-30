@@ -73,19 +73,58 @@ export async function startJobRun(
     .select('run_id')
     .single();
 
-  if (error) {
-    // 冪等性: 同一 job_name + target_date で既に実行済みの場合
-    if (error.code === '23505') {
-      logger.info('Job run already exists for this target date', { jobName, targetDate });
-      return { runId: '', error: 'Job already executed for this target date' };
-    }
-
-    logger.error('Failed to start job run', { jobName, targetDate, error });
-    return { runId: '', error: error.message };
+  if (!error) {
+    logger.info('Job run started', { jobName, targetDate, runId: data.run_id });
+    return { runId: data.run_id };
   }
 
-  logger.info('Job run started', { jobName, targetDate, runId: data.run_id });
-  return { runId: data.run_id };
+  // 冪等性: 同一 job_name + target_date の行が既存（uq_job_runs_job_target は target_date が
+  // 非null のときのみ有効な部分ユニークインデックス）。**失敗(failed)した前回 run のみ**を
+  // 再取得して running に戻すことで、watchdog による再ディスパッチが既存行を success へ更新でき、
+  // 収束する。既存が success / running の場合は再取得せず「実行済み」として扱い、成功監査ログを
+  // 巻き戻さない（status='failed' 条件で update 0 件 → PGRST116）。
+  // 部分インデックスのため supabase-js の upsert(onConflict) は使えず、insert→update で実現する。
+  if (error.code === '23505' && targetDate) {
+    const { data: reclaimed, error: reclaimError } = await supabase
+      .from('job_runs')
+      .update({
+        status: 'running',
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        error_message: null,
+        meta,
+      })
+      .eq('job_name', jobName)
+      .eq('target_date', targetDate)
+      .eq('status', 'failed')
+      .select('run_id')
+      .single();
+
+    if (reclaimError || !reclaimed) {
+      // PGRST116 = 該当行なし（既存が success または running）→ 実行済みとして再実行しない
+      if (reclaimError?.code === 'PGRST116') {
+        logger.info('Job run already exists and is not failed; skipping re-run', { jobName, targetDate });
+        return { runId: '', error: 'Job already executed for this target date' };
+      }
+      logger.error('Failed to reclaim existing job run', { jobName, targetDate, error: reclaimError });
+      return { runId: '', error: reclaimError?.message ?? 'Failed to reclaim existing job run' };
+    }
+
+    // 再実行に伴い前回の job_run_items をクリア（古い dataset 状態を残さない）
+    const { error: itemsError } = await supabase
+      .from('job_run_items')
+      .delete()
+      .eq('run_id', reclaimed.run_id);
+    if (itemsError) {
+      logger.warn('Failed to clear stale job_run_items on reclaim', { runId: reclaimed.run_id, error: itemsError });
+    }
+
+    logger.info('Job run reclaimed for re-run', { jobName, targetDate, runId: reclaimed.run_id });
+    return { runId: reclaimed.run_id };
+  }
+
+  logger.error('Failed to start job run', { jobName, targetDate, error });
+  return { runId: '', error: error.message };
 }
 
 /**

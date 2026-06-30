@@ -1,4 +1,5 @@
 name: Cron E - Yutai Data Sync
+run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
 on:
   schedule:
     - cron: '30 7 * * *'  # JST 16:30（毎日、市場閉場後）
@@ -9,6 +10,11 @@ on:
         default: 'all'
         type: choice
         options: ['all', 'kabuyutai', 'kabu_csv']
+      dispatch_label:
+        description: '外部トリガー識別ラベル（pg_cron発火時に付与・二重実行防止用）'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: cron-e
