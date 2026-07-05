@@ -27,7 +27,9 @@ const jstPartsFormatter = new Intl.DateTimeFormat('en-US', {
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
-  hour12: false,
+  // hour12 と hourCycle を併用すると仕様上 hour12 が優先されうるため、
+  // hour12 は指定せず hourCycle: 'h23' のみで 0-23 時制（0時=00）を明示する
+  hourCycle: 'h23',
 });
 
 /**
