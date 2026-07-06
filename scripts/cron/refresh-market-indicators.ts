@@ -26,7 +26,7 @@
 
 import { createAdminClient } from '../../src/lib/supabase/admin';
 import { createLogger } from '../../src/lib/utils/logger';
-import { getJSTDate } from '../../src/lib/utils/date';
+import { getJSTDate, getJSTDateTime } from '../../src/lib/utils/date';
 import {
   BreadthAccumulator,
   includesPreviousYear,
@@ -103,17 +103,23 @@ async function main(): Promise<void> {
     throw new Error(`Failed to get latest trade_date: ${latestErr?.message ?? 'no rows'}`);
   }
   const breadthEnd = (latestRow as { trade_date: string }).trade_date;
+  // 場中（大引け前）に実行された場合、外部ソースの当日行は「場中スナップショット」で
+  // あり確定値ではない。NULL検出方式では一度書くと夜の正規実行で上書きされないため、
+  // JST16時前は external の対象を前日までに制限する（定時実行はJST18:40なので影響なし）。
+  // externalCap は breadthEnd とは独立に適用する（当日バーが存在してもガードを維持）。
   const today = getJSTDate();
-  const externalEnd = breadthEnd > today ? breadthEnd : today;
+  const jstHour = Number(getJSTDateTime().slice(11, 13));
+  const externalCap = jstHour >= 16 ? today : addDays(today, -1);
+  const scanEnd = breadthEnd > externalCap ? breadthEnd : externalCap;
   const windowStart = full
     ? SERIES_START
-    : addDays(breadthEnd > externalEnd ? externalEnd : breadthEnd, -WINDOW_DAYS);
-  logger.info('Scan window', { windowStart, breadthEnd, externalEnd, full });
+    : addDays(breadthEnd < externalCap ? breadthEnd : externalCap, -WINDOW_DAYS);
+  logger.info('Scan window', { windowStart, breadthEnd, externalCap, full });
 
   // 2) 窓内の営業日と保存済み行。騰落レシオの25日窓用に、正準営業日軸は
   //    窓より70暦日（>24営業日）前から持つ。
-  const calendarDays = await listBusinessDays(core, windowStart, externalEnd);
-  const externalDays = calendarDays;
+  const calendarDays = await listBusinessDays(core, windowStart, scanEnd);
+  const externalDays = calendarDays.filter((d) => d <= externalCap);
   const breadthDays = calendarDays.filter((d) => d <= breadthEnd);
   const ratioDays = full
     ? breadthDays
@@ -125,7 +131,7 @@ async function main(): Promise<void> {
     existingRows: rowMap.size,
   });
 
-  const summary: Record<string, unknown> = { windowStart, breadthEnd, externalEnd, dryRun };
+  const summary: Record<string, unknown> = { windowStart, breadthEnd, externalCap, dryRun };
   const failures: string[] = [];
 
   // 3) 各ソースグループを独立に forward-fill（外部起因の失敗は他グループを止めない）
@@ -148,7 +154,7 @@ async function main(): Promise<void> {
       failures.push(`daily2: ${message(e)}`);
     }
     try {
-      summary.weekly = await fillWeekly(analytics, windowStart, externalEnd, rowMap, dryRun);
+      summary.weekly = await fillWeekly(analytics, windowStart, externalCap, rowMap, dryRun);
     } catch (e) {
       failures.push(`weekly: ${message(e)}`);
     }
