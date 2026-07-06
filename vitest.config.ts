@@ -61,6 +61,11 @@ export default defineConfig({
         'src/lib/fred/client.ts',
         'src/lib/fred/series-config.ts',
         'src/lib/estat/client.ts',
+        // market indicators
+        'src/lib/market/yahoo-chart-client.ts',
+        'src/lib/market/nikkei225jp-client.ts',
+        'src/lib/market/seed-validation.ts',
+        'src/lib/analytics/market-breadth.ts',
       ],
       thresholds: {
         statements: 80,

@@ -20,7 +20,9 @@
     "seed:investors": "tsx scripts/seed/investor-types.ts",
     "seed:all": "tsx scripts/seed/index.ts",
     "cron:direct": "tsx scripts/cron/cron-a-direct.ts",
-    "cron:d": "tsx scripts/cron/cron-d-direct.ts"
+    "cron:d": "tsx scripts/cron/cron-d-direct.ts",
+    "seed:market": "tsx scripts/seed/market-indicators.ts",
+    "cron:market": "tsx scripts/cron/refresh-market-indicators.ts"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.36.0",
@@ -34,10 +36,12 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
     "@vitest/coverage-v8": "^4.0.18",
+    "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.7",
     "eslint": "^9.18.0",
     "eslint-config-next": "^16.1.4",

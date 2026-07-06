@@ -108,6 +108,28 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/refresh-technical.ts
 
+      # 市場全体指標（analytics.market_indicators）を forward-fill 更新。
+      # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
+      # breadth（騰落数/新高値新安値/売買代金）は当日株価とマスタに依存するため
+      # technical と同じゲート条件で実行する。
+      - name: Refresh market indicators - breadth
+        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success'
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/refresh-market-indicators.ts --only-breadth
+
+      # external(Yahoo/nikkei225jp)/weekly/derived は株価同期と独立に実行できる
+      # （日経終値・PER等は外部ソース由来。同期失敗日でも取り込みを止めない）。
+      - name: Refresh market indicators - external
+        if: always() && steps.calendar.outcome == 'success'
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/refresh-market-indicators.ts --skip-breadth
+
       - name: Notify on failure
         if: failure()
         run: |
