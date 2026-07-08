@@ -10,7 +10,7 @@ import { createLogger, type LogContext } from '../../utils/logger';
 import { createFredClient } from '../../fred/client';
 import { createEStatClient } from '../../estat/client';
 import { isMonthlyOrLower } from '../../fred/series-config';
-import { createMofClient, tenorForSourceSeriesId } from '../../mof/client';
+import { createMofClient, tenorForSourceSeriesId, releasedAtForJgbDate } from '../../mof/client';
 import { createAdminClient } from '../../supabase/admin';
 import { sendJobFailureEmail } from '../../notification/email';
 
@@ -333,7 +333,7 @@ async function processMofSeries(
           series_id: series.series_id,
           source: 'mof' as const,
           value: row.tenors[tenor] as number,
-          released_at: fetchedAt,
+          released_at: releasedAtForJgbDate(row.date),
           updated_at: fetchedAt,
         }));
 

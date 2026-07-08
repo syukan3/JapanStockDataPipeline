@@ -7,9 +7,16 @@ import {
   parseEraDate,
   parseMofJgbCsv,
   tenorForSourceSeriesId,
+  releasedAtForJgbDate,
   createMofClient,
   TENOR_COLUMNS,
 } from '@/lib/mof/client';
+
+describe('releasedAtForJgbDate', () => {
+  it('観測日(indicator_date)ベースのタイムスタンプを返す（取得時刻ではない）', () => {
+    expect(releasedAtForJgbDate('2026-07-07')).toBe('2026-07-07T15:00:00+09:00');
+  });
+});
 
 describe('parseEraDate', () => {
   it('令和を西暦に変換する', () => {

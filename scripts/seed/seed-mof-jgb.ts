@@ -13,7 +13,7 @@
 
 import { loadEnv } from './_shared';
 import { createClient } from '@supabase/supabase-js';
-import { ALL_HISTORY_CSV_URL, parseMofJgbCsv, tenorForSourceSeriesId } from '../../src/lib/mof/client';
+import { ALL_HISTORY_CSV_URL, parseMofJgbCsv, tenorForSourceSeriesId, releasedAtForJgbDate } from '../../src/lib/mof/client';
 
 const TARGET_SERIES = ['mof_jgb_20y', 'mof_jgb_30y'] as const;
 const SOURCE_SERIES_ID: Record<(typeof TARGET_SERIES)[number], string> = {
@@ -54,7 +54,7 @@ async function main() {
         series_id: seriesId,
         source: 'mof' as const,
         value: row.tenors[tenor] as number,
-        released_at: fetchedAt,
+        released_at: releasedAtForJgbDate(row.date),
         updated_at: fetchedAt,
       }));
 

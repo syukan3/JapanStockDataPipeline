@@ -80,6 +80,16 @@ export function parseMofJgbCsv(buffer: ArrayBuffer | Uint8Array): MofJgbRow[] {
   return rows;
 }
 
+/**
+ * ある観測日の released_at として使うタイムスタンプを返す。
+ * MOFは同日中に当日分の利回りを公表するため、取得時刻(now)ではなく観測日ベースで
+ * 固定する（バックフィル時にnow()を入れると、過去日付でのas-of評価で
+ * released_at <= evalDate を満たせず永久に見えなくなるバグを避けるため）。
+ */
+export function releasedAtForJgbDate(date: string): string {
+  return `${date}T15:00:00+09:00`;
+}
+
 export interface MofClient {
   /** 当月分のJGB利回りカーブを取得（日次cron用の差分取得元） */
   getJgbCurve(): Promise<MofJgbRow[]>;
