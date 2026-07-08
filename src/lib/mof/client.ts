@@ -5,6 +5,12 @@
  * 認証不要。Shift_JIS + 和暦日付という独特のフォーマットのため専用パーサを持つ。
  */
 
+import { fetchWithRetry } from '../utils/retry';
+
+/** MOFエンドポイントのタイムアウト（ミリ秒）。ハングしてCron D全体(GH Actions 15分)を
+ *  止めないよう、FRED/e-Statクライアントと同様に短めに設定する。 */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 const CURRENT_MONTH_CSV_URL = 'https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv';
 export const ALL_HISTORY_CSV_URL = 'https://www.mof.go.jp/jgbs/reference/interest_rate/data/jgbcm_all.csv';
 
@@ -97,10 +103,11 @@ export interface MofClient {
 
 export function createMofClient(): MofClient {
   async function getJgbCurve(): Promise<MofJgbRow[]> {
-    const res = await fetch(CURRENT_MONTH_CSV_URL);
-    if (!res.ok) {
-      throw new Error(`MOF CSV fetch failed: HTTP ${res.status}`);
-    }
+    const res = await fetchWithRetry(
+      CURRENT_MONTH_CSV_URL,
+      { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
+      { maxRetries: 2, baseDelayMs: 200 }
+    );
     const buf = await res.arrayBuffer();
     return parseMofJgbCsv(buf);
   }
