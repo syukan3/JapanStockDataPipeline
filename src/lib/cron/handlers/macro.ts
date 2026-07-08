@@ -10,13 +10,14 @@ import { createLogger, type LogContext } from '../../utils/logger';
 import { createFredClient } from '../../fred/client';
 import { createEStatClient } from '../../estat/client';
 import { isMonthlyOrLower } from '../../fred/series-config';
+import { createMofClient, tenorForSourceSeriesId } from '../../mof/client';
 import { createAdminClient } from '../../supabase/admin';
 import { sendJobFailureEmail } from '../../notification/email';
 
 const logger = createLogger({ module: 'cron-d-macro' });
 
 /** Cron D で処理するソース */
-export const CRON_D_SOURCES = ['fred', 'estat', 'all'] as const;
+export const CRON_D_SOURCES = ['fred', 'estat', 'mof', 'all'] as const;
 export type CronDSource = (typeof CRON_D_SOURCES)[number];
 
 /** リクエストボディのスキーマ */
@@ -49,7 +50,7 @@ const INITIAL_BACKFILL_DAYS = 730;
 /** 系列メタデータの型 */
 interface SeriesMetadata {
   series_id: string;
-  source: 'fred' | 'estat';
+  source: 'fred' | 'estat' | 'mof';
   source_series_id: string;
   source_filter: Record<string, string> | null;
   frequency: string;
@@ -285,6 +286,107 @@ async function processEStatSeries(
 }
 
 /**
+ * MOF（財務省 国債金利情報）系列を処理。
+ * CSVは全年限を含む1本のファイルなので、対象系列が複数あってもフェッチは1回のみ。
+ */
+async function processMofSeries(
+  seriesList: SeriesMetadata[],
+  logContext: LogContext
+): Promise<{ rowsUpserted: number; skippedValues: number; errors: string[] }> {
+  const supabaseCore = createAdminClient('jquants_core');
+
+  let totalUpserted = 0;
+  let totalSkipped = 0;
+  const errors: string[] = [];
+
+  let curve: Awaited<ReturnType<ReturnType<typeof createMofClient>['getJgbCurve']>>;
+  try {
+    curve = await createMofClient().getJgbCurve();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.error('Failed to fetch MOF JGB curve', { ...logContext, error: msg });
+    return {
+      rowsUpserted: 0,
+      skippedValues: 0,
+      errors: seriesList.map((s) => `${s.series_id}: ${msg}`),
+    };
+  }
+
+  const fetchedAt = new Date().toISOString();
+
+  for (const series of seriesList) {
+    try {
+      const tenor = tenorForSourceSeriesId(series.source_series_id);
+      if (!tenor) {
+        errors.push(`${series.series_id}: unknown source_series_id ${series.source_series_id}`);
+        continue;
+      }
+
+      const candidates = series.last_value_date
+        ? curve.filter((row) => row.date > series.last_value_date!)
+        : curve;
+
+      const rows = candidates
+        .filter((row) => row.tenors[tenor] != null)
+        .map((row) => ({
+          indicator_date: row.date,
+          series_id: series.series_id,
+          source: 'mof' as const,
+          value: row.tenors[tenor] as number,
+          released_at: fetchedAt,
+          updated_at: fetchedAt,
+        }));
+
+      totalSkipped += candidates.length - rows.length;
+
+      if (rows.length === 0) {
+        logger.info('No new data for MOF series', { seriesId: series.series_id });
+        continue;
+      }
+
+      const { error } = await supabaseCore
+        .from('macro_indicator_daily')
+        .upsert(rows, { onConflict: 'indicator_date,series_id' });
+
+      if (error) {
+        logger.error('Failed to upsert MOF data', {
+          seriesId: series.series_id,
+          error: error.message,
+        });
+        errors.push(`${series.series_id}: ${error.message}`);
+        continue;
+      }
+
+      totalUpserted += rows.length;
+
+      const maxDate = rows.reduce(
+        (max, r) => (r.indicator_date > max ? r.indicator_date : max),
+        rows[0].indicator_date
+      );
+
+      await supabaseCore
+        .from('macro_series_metadata')
+        .update({ last_fetched_at: fetchedAt, last_value_date: maxDate })
+        .eq('series_id', series.series_id);
+
+      logger.info('MOF series processed', {
+        seriesId: series.series_id,
+        rowsUpserted: rows.length,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error('Failed to process MOF series', {
+        seriesId: series.series_id,
+        error: msg,
+      });
+      errors.push(`${series.series_id}: ${msg}`);
+    }
+  }
+
+  return { rowsUpserted: totalUpserted, skippedValues: totalSkipped, errors };
+}
+
+/**
  * Cron D メインハンドラー
  */
 export async function handleCronD(
@@ -331,6 +433,7 @@ export async function handleCronD(
 
     const fredSeries = seriesList.filter((s: SeriesMetadata) => s.source === 'fred');
     const estatSeries = seriesList.filter((s: SeriesMetadata) => s.source === 'estat');
+    const mofSeries = seriesList.filter((s: SeriesMetadata) => s.source === 'mof');
 
     // FRED 系列を処理
     if (fredSeries.length > 0) {
@@ -348,6 +451,15 @@ export async function handleCronD(
       result.skippedValues += estatResult.skippedValues;
       result.errors.push(...estatResult.errors);
       result.seriesProcessed += estatSeries.length;
+    }
+
+    // MOF（国債金利情報）系列を処理
+    if (mofSeries.length > 0) {
+      const mofResult = await processMofSeries(mofSeries, logContext);
+      result.rowsUpserted += mofResult.rowsUpserted;
+      result.skippedValues += mofResult.skippedValues;
+      result.errors.push(...mofResult.errors);
+      result.seriesProcessed += mofSeries.length;
     }
 
     // エラーがあっても部分成功として扱う

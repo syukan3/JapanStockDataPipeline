@@ -17,6 +17,7 @@ on:
           - all
           - fred
           - estat
+          - mof
         default: all
       backfill_days:
         description: '過去N日分をバックフィル（0=差分のみ）'

@@ -40,6 +40,8 @@ export const FRED_SERIES: readonly FredSeriesConfig[] = [
   { seriesId: 'VIXCLS',            category: 'market',         region: 'us',      frequency: 'daily',   nameEn: 'CBOE VIX',                        nameJa: 'VIX' },
   // 金利
   { seriesId: 'T10Y2Y',            category: 'interest_rate',  region: 'us',      frequency: 'daily',   nameEn: '10Y-2Y Treasury Spread',          nameJa: '10Y-2Yスプレッド' },
+  { seriesId: 'DGS10',             category: 'interest_rate',  region: 'us',      frequency: 'daily',   nameEn: '10-Year Treasury Yield',          nameJa: '米10年債利回り' },
+  { seriesId: 'DGS30',             category: 'interest_rate',  region: 'us',      frequency: 'daily',   nameEn: '30-Year Treasury Yield',          nameJa: '米30年債利回り' },
   // 日本関連
   { seriesId: 'IRSTCI01JPM156N',   category: 'interest_rate',  region: 'jp',      frequency: 'monthly', nameEn: 'BOJ Policy Rate (via FRED)',      nameJa: '日銀政策金利（FRED経由）' },
   { seriesId: 'IRLTLT01JPM156N',   category: 'interest_rate',  region: 'jp',      frequency: 'monthly', nameEn: 'JGB 10Y Yield (via FRED)',        nameJa: 'JGB10年利回り（FRED経由）' },
