@@ -54,3 +54,6 @@ supabase/.temp/
 
 # direnv
 .envrc
+
+# ローカル専用の一度きりの運用スクリプト（Portfolioリポと同じ方針）
+scripts/local/
