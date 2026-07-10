@@ -220,3 +220,74 @@ export async function sendConsecutiveFailureAlert(
     return false;
   }
 }
+
+export interface WorkflowFailureNotification {
+  /** GitHub Actions ワークフロー内のジョブ識別子（cron_a 等。JobName外の値も許容） */
+  job: string;
+  /** GitHub Actions の run_id（リンク生成用、無ければ null） */
+  workflowRunId: string | null;
+  /** 発生時刻 */
+  timestamp: Date;
+}
+
+/**
+ * GitHub Actions ワークフローのステップ自体が失敗した際のフォールバック通知。
+ *
+ * @description この関数自身も呼び出し元のAPI Route経由でVERCEL_URL/CRON_SECRETに
+ * 依存するため、CRON_SECRET不一致やVercel全体障害はカバーできない。カバーするのは、
+ * ジョブ内部の失敗メール送信（sendJobFailureEmail等）に到達する前にVercel関数が
+ * タイムアウト/クラッシュした場合や、db-archivalのようにGH Actionsランナー上の
+ * スクリプト単体が未捕捉の異常終了で内部メール送信自体に到達できなかった場合。
+ */
+export async function sendWorkflowFailureEmail(
+  data: WorkflowFailureNotification
+): Promise<boolean> {
+  const resend = getResendClient();
+  const to = getAlertEmailTo();
+
+  if (!resend || !to) {
+    logger.info('Workflow failure email skipped (not configured)', { job: data.job });
+    return false;
+  }
+
+  const runUrl = data.workflowRunId
+    ? `https://github.com/syukan3/JapanStockDataPipeline/actions/runs/${data.workflowRunId}`
+    : null;
+
+  try {
+    const result = await resend.emails.send({
+      from: getEmailFrom(),
+      to: [to],
+      subject: `[ALERT] ${data.job} ワークフローステップが失敗`,
+      html: `
+        <h2 style="color: #dc2626;">ワークフロー失敗通知</h2>
+        <p><strong>ジョブ:</strong> ${escapeHtml(data.job)}</p>
+        <p><strong>発生時刻:</strong> ${data.timestamp.toISOString()}</p>
+        ${runUrl ? `<p><strong>Run:</strong> <a href="${runUrl}">${escapeHtml(runUrl)}</a></p>` : ''}
+        <p style="color: #6b7280;">
+          GitHub Actions のジョブ実行ステップ自体が失敗しました
+          （Vercel関数のタイムアウト/クラッシュ等でジョブ内部の失敗通知に
+          到達できなかった場合を含みます）。ワークフローのログを確認してください。
+        </p>
+        <p style="color: #9ca3af; font-size: 12px;">
+          この通知自体も本体と同じVercel/CRON_SECRETに依存するため、
+          CRON_SECRET不一致やVercel全体障害時はこの通知も届きません。
+        </p>
+      `,
+    });
+
+    if (result.error) {
+      logger.error('Failed to send workflow failure email', {
+        job: data.job,
+        error: result.error,
+      });
+      return false;
+    }
+
+    logger.info('Workflow failure email sent', { job: data.job, workflowRunId: data.workflowRunId });
+    return true;
+  } catch (error) {
+    logger.error('Error sending workflow failure email', { job: data.job, error });
+    return false;
+  }
+}

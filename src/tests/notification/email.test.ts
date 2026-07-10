@@ -20,6 +20,7 @@ import {
   sendJobFailureEmail,
   sendJobSuccessEmail,
   sendConsecutiveFailureAlert,
+  sendWorkflowFailureEmail,
 } from '@/lib/notification/email';
 
 describe('notification/email.ts', () => {
@@ -224,6 +225,115 @@ describe('notification/email.ts', () => {
       delete process.env.RESEND_API_KEY;
 
       const result = await sendConsecutiveFailureAlert('cron_a', 3, ['Error']);
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('sendWorkflowFailureEmail', () => {
+    it('設定が揃っている場合はメール送信し、run URLを含める', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockResolvedValue({ data: { id: 'email-123' }, error: null });
+
+      const result = await sendWorkflowFailureEmail({
+        job: 'cron_b',
+        workflowRunId: '123456789',
+        timestamp: new Date(),
+      });
+
+      expect(result).toBe(true);
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: ['test@example.com'],
+          subject: expect.stringContaining('cron_b'),
+          html: expect.stringContaining(
+            'https://github.com/syukan3/JapanStockDataPipeline/actions/runs/123456789'
+          ),
+        })
+      );
+    });
+
+    it('メール本文にこの通知経路の限界（CRON_SECRET不一致・Vercel全体障害は非対応）を明記する', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockResolvedValue({ data: { id: 'email-123' }, error: null });
+
+      await sendWorkflowFailureEmail({
+        job: 'cron_b',
+        workflowRunId: null,
+        timestamp: new Date(),
+      });
+
+      const html = mockSend.mock.calls[0][0].html.replace(/\s+/g, '');
+      expect(html).toContain(
+        'この通知自体も本体と同じVercel/CRON_SECRETに依存するため、CRON_SECRET不一致やVercel全体障害時はこの通知も届きません'.replace(
+          /\s+/g,
+          ''
+        )
+      );
+    });
+
+    it('workflowRunIdがnullの場合はrun URLを含めない', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockResolvedValue({ data: { id: 'email-123' }, error: null });
+
+      await sendWorkflowFailureEmail({
+        job: 'cron_b',
+        workflowRunId: null,
+        timestamp: new Date(),
+      });
+
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          html: expect.not.stringContaining('github.com'),
+        })
+      );
+    });
+
+    it('RESEND_API_KEY未設定の場合はfalseを返す', async () => {
+      delete process.env.RESEND_API_KEY;
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      const result = await sendWorkflowFailureEmail({
+        job: 'cron_b',
+        workflowRunId: '123',
+        timestamp: new Date(),
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it('Resendエラーの場合はfalseを返す', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockResolvedValue({ data: null, error: { message: 'Rate limit exceeded' } });
+
+      const result = await sendWorkflowFailureEmail({
+        job: 'cron_b',
+        workflowRunId: '123',
+        timestamp: new Date(),
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it('例外が発生してもfalseを返す（クラッシュしない）', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockRejectedValue(new Error('Network error'));
+
+      const result = await sendWorkflowFailureEmail({
+        job: 'cron_b',
+        workflowRunId: '123',
+        timestamp: new Date(),
+      });
 
       expect(result).toBe(false);
     });
