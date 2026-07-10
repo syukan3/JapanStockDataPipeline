@@ -89,6 +89,41 @@ describe('cron/job-run.ts', () => {
       );
     });
 
+    it('Cron Bはclaimと同時にfailed coverage fenceを要求する', async () => {
+      const rpc = vi.fn().mockResolvedValue({
+        data: [
+          {
+            run_id: 'new-run-id',
+            attempt_id: 'new-attempt-id',
+            claimed: true,
+            reason: 'inserted',
+          },
+        ],
+        error: null,
+      });
+
+      const result = await startJobRun({ rpc } as any, {
+        jobName: 'cron_b',
+        targetDate: '2024-01-16',
+        reclaimStaleAfterSeconds: 60,
+        reclaimSuccessAfterSeconds: 21_600,
+        coverageDataset: 'earnings_calendar',
+      });
+
+      expect(result).toEqual({
+        runId: 'new-run-id',
+        attemptId: 'new-attempt-id',
+      });
+      expect(rpc).toHaveBeenCalledWith('claim_job_run', {
+        p_job_name: 'cron_b',
+        p_target_date: '2024-01-16',
+        p_meta: {},
+        p_running_stale_after_seconds: 60,
+        p_success_stale_after_seconds: 21_600,
+        p_coverage_dataset: 'earnings_calendar',
+      });
+    });
+
     it('同一日付の既存runを再取得してrun_idを返す（再ディスパッチ収束）', async () => {
       const single = vi.fn()
         .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key value' } })
@@ -148,6 +183,109 @@ describe('cron/job-run.ts', () => {
 
       expect(result.runId).toBe('');
       expect(result.error).toBe('Job already executed for this target date');
+      expect(result.alreadyExecuted).toBe(true);
+    });
+
+    it('古いrunning runは指定したTTLを過ぎていれば再取得する', async () => {
+      const rpc = vi.fn().mockResolvedValue({
+        data: [
+          {
+            run_id: 'stale-running-id',
+            attempt_id: 'new-attempt-id',
+            claimed: true,
+            reason: 'stale_running',
+          },
+        ],
+        error: null,
+      });
+      const mockSupabase = {
+        rpc,
+      };
+
+      const result = await startJobRun(mockSupabase as any, {
+        jobName: 'cron_b',
+        targetDate: '2024-01-16',
+        reclaimStaleAfterSeconds: 60,
+      });
+
+      expect(result).toEqual({
+        runId: 'stale-running-id',
+        attemptId: 'new-attempt-id',
+      });
+      expect(rpc).toHaveBeenCalledWith('claim_job_run', {
+        p_job_name: 'cron_b',
+        p_target_date: '2024-01-16',
+        p_meta: {},
+        p_running_stale_after_seconds: 60,
+        p_success_stale_after_seconds: null,
+        p_coverage_dataset: null,
+      });
+    });
+
+    it('翌日も同じtargetで、6時間より古いsuccessを再観測のため再取得する', async () => {
+      const rpc = vi.fn().mockResolvedValue({
+        data: [
+          {
+            run_id: 'previous-success-id',
+            attempt_id: 'reobserve-attempt-id',
+            claimed: true,
+            reason: 'stale_success',
+          },
+        ],
+        error: null,
+      });
+      const mockSupabase = {
+        rpc,
+      };
+
+      const result = await startJobRun(mockSupabase as any, {
+        jobName: 'cron_b',
+        targetDate: '2024-01-17',
+        reclaimStaleAfterSeconds: 60,
+        reclaimSuccessAfterSeconds: 6 * 60 * 60,
+      });
+
+      expect(result).toEqual({
+        runId: 'previous-success-id',
+        attemptId: 'reobserve-attempt-id',
+      });
+      expect(rpc).toHaveBeenCalledWith(
+        'claim_job_run',
+        expect.objectContaining({
+          p_running_stale_after_seconds: 60,
+          p_success_stale_after_seconds: 21_600,
+        })
+      );
+    });
+
+    it('6時間未満のsuccess duplicateは再取得せずalreadyExecutedにする', async () => {
+      const rpc = vi.fn().mockResolvedValue({
+        data: [
+          {
+            run_id: 'current-run-id',
+            attempt_id: null,
+            claimed: false,
+            reason: 'already_executed',
+          },
+        ],
+        error: null,
+      });
+      const mockSupabase = {
+        rpc,
+      };
+
+      const result = await startJobRun(mockSupabase as any, {
+        jobName: 'cron_b',
+        targetDate: '2024-01-16',
+        reclaimStaleAfterSeconds: 60,
+        reclaimSuccessAfterSeconds: 6 * 60 * 60,
+      });
+
+      expect(result).toEqual({
+        runId: '',
+        error: 'Job already executed for this target date',
+        alreadyExecuted: true,
+      });
     });
 
     it('targetDateなしの23505は再取得せずエラーを返す', async () => {
@@ -201,8 +339,13 @@ describe('cron/job-run.ts', () => {
         })),
       };
 
-      await completeJobRun(mockSupabase as any, 'run-123', 'success');
+      const result = await completeJobRun(
+        mockSupabase as any,
+        'run-123',
+        'success'
+      );
 
+      expect(result).toEqual({ completed: true });
       expect(updateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'success',
@@ -257,10 +400,52 @@ describe('cron/job-run.ts', () => {
         })),
       };
 
-      // 例外が投げられないことを確認
       await expect(
         completeJobRun(mockSupabase as any, 'run-123', 'success')
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({
+        completed: false,
+        reason: 'db_error',
+        error: 'DB Error',
+      });
+    });
+
+    it('attempt条件付きRPCでjob完了とheartbeatを原子的に更新する', async () => {
+      const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+      const mockSupabase = { rpc };
+
+      const result = await completeJobRun(
+        mockSupabase as any,
+        'run-123',
+        'success',
+        undefined,
+        'attempt-123',
+        { fetched: 3, inserted: 3 }
+      );
+
+      expect(result).toEqual({ completed: true });
+      expect(rpc).toHaveBeenCalledWith('complete_job_run_attempt', {
+        p_run_id: 'run-123',
+        p_attempt_id: 'attempt-123',
+        p_status: 'success',
+        p_error_message: null,
+        p_heartbeat_meta: { fetched: 3, inserted: 3 },
+      });
+    });
+
+    it('reclaim後の旧attempt完了を拒否する', async () => {
+      const mockSupabase = {
+        rpc: vi.fn().mockResolvedValue({ data: false, error: null }),
+      };
+
+      await expect(
+        completeJobRun(
+          mockSupabase as any,
+          'run-123',
+          'failed',
+          'late failure',
+          'old-attempt'
+        )
+      ).resolves.toEqual({ completed: false, reason: 'superseded' });
     });
   });
 

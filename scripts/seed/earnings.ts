@@ -23,16 +23,52 @@ async function main(): Promise<SeedResult> {
 
   const timer = startTimer();
 
-  // 動的インポート（環境変数ロード後）
-  const { syncEarningsCalendar } = await import(
-    '../../src/lib/jquants/endpoints/earnings-calendar'
-  );
+  // 動的インポート（環境変数ロード後）。決算カレンダーの
+  // writerはCron Bルートに一元化し、lock / coverage fenceを迂回しない。
+  const { POST } = await import('../../src/app/api/cron/jquants/b/route');
 
   // 決算発表予定は1リクエストで取得可能（翌営業日分のみ）
   const progress = createProgress(1, 'earnings');
 
   try {
-    const result = await syncEarningsCalendar();
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret) {
+      throw new Error('CRON_SECRET is required for earnings seed');
+    }
+
+    const response = await POST(
+      new Request('http://localhost/api/cron/jquants/b', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cronSecret}`,
+          'Content-Type': 'application/json',
+        },
+      })
+    );
+    const result = (await response.json()) as {
+      success?: boolean;
+      announcementDate?: string | null;
+      fetched?: number;
+      inserted?: number;
+      error?: string;
+      detail?: string;
+    };
+
+    if (!response.ok || result.success !== true) {
+      if (response.ok && result.error === 'Job already executed') {
+        console.log('  Cron B already completed for the target date');
+        progress.done();
+        return {
+          name: 'Earnings Calendar',
+          fetched: 0,
+          inserted: 0,
+          errors: [],
+          durationMs: timer(),
+        };
+      }
+      throw new Error(result.detail ?? result.error ?? `Cron B failed (${response.status})`);
+    }
+
     progress.done();
 
     if (result.announcementDate) {
@@ -41,9 +77,9 @@ async function main(): Promise<SeedResult> {
 
     const seedResult: SeedResult = {
       name: 'Earnings Calendar',
-      fetched: result.fetched,
-      inserted: result.inserted,
-      errors: result.errors,
+      fetched: result.fetched ?? 0,
+      inserted: result.inserted ?? 0,
+      errors: [],
       durationMs: timer(),
     };
 

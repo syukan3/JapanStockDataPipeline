@@ -12,11 +12,9 @@ import { JQuantsClient, createJQuantsClient } from '../client';
 import type { EarningsCalendarItem, EarningsCalendarRecord } from '../types';
 import { getSupabaseAdmin } from '../../supabase/admin';
 import { POSTGREST_ERROR_CODES } from '../../supabase/errors';
-import { batchUpsert } from '../../utils/batch';
 import { createLogger, type LogContext } from '../../utils/logger';
 
 const TABLE_NAME = 'earnings_calendar';
-const ON_CONFLICT = 'announcement_date,local_code';
 
 export interface SyncEarningsCalendarResult {
   /** 取得件数 */
@@ -27,6 +25,42 @@ export interface SyncEarningsCalendarResult {
   announcementDate: string | null;
   /** エラー一覧 */
   errors: Error[];
+  /** API応答を受け取った時刻 */
+  sourceObservedAt: string;
+}
+
+interface SyncEarningsCalendarOptions {
+  client?: JQuantsClient;
+  logContext?: LogContext;
+  /** Cron Bが trading_calendar から事前に固定した対象日 */
+  expectedAnnouncementDate: string;
+  /** job_runs.run_id */
+  runId: string;
+  /** reclaimごとに更新されるfencing token */
+  attemptId: string;
+}
+
+/** API観測後の永続化失敗でも、failed coverageへ観測情報を伝える。 */
+export class EarningsCalendarSyncError extends Error {
+  readonly fetched: number;
+  readonly inserted: number;
+  readonly sourceObservedAt: string | null;
+
+  constructor(
+    message: string,
+    details: {
+      fetched: number;
+      inserted: number;
+      sourceObservedAt: string | null;
+    },
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = 'EarningsCalendarSyncError';
+    this.fetched = details.fetched;
+    this.inserted = details.inserted;
+    this.sourceObservedAt = details.sourceObservedAt;
+  }
 }
 
 /**
@@ -61,38 +95,55 @@ export async function fetchEarningsCalendar(
  * @param options オプション
  */
 export async function syncEarningsCalendar(
-  options?: {
-    client?: JQuantsClient;
-    logContext?: LogContext;
-  }
+  options: SyncEarningsCalendarOptions
 ): Promise<SyncEarningsCalendarResult> {
-  const client = options?.client ?? createJQuantsClient({ logContext: options?.logContext });
-  const logger = createLogger({ dataset: 'earnings_calendar', ...options?.logContext });
+  if (!options?.expectedAnnouncementDate) {
+    throw new Error('expectedAnnouncementDate is required for earnings calendar sync');
+  }
+  if (!options.runId || !options.attemptId) {
+    throw new Error('runId and attemptId are required for fenced earnings calendar sync');
+  }
+
+  const client = options.client ?? createJQuantsClient({ logContext: options.logContext });
+  const logger = createLogger({ dataset: 'earnings_calendar', ...options.logContext });
   const supabase = getSupabaseAdmin();
 
   const timer = logger.startTimer('Sync earnings calendar');
+  let fetched = 0;
+  let sourceObservedAt: string | null = null;
 
   try {
     // 1. APIからデータ取得
     logger.info('Fetching earnings calendar');
     const items = await fetchEarningsCalendar(client);
-
-    if (items.length === 0) {
-      logger.info('No earnings calendar data found');
-      timer.end({ fetched: 0, inserted: 0 });
-      return { fetched: 0, inserted: 0, announcementDate: null, errors: [] };
-    }
+    fetched = items.length;
+    sourceObservedAt = new Date().toISOString();
 
     // 決算発表日を取得（全て同じ日付のはずだが検証する）
     const firstDate = items[0]?.Date ?? null;
     const allDatesMatch = items.every((item) => item.Date === firstDate);
+    const uniqueDates = [...new Set(items.map((item) => item.Date))];
 
     if (!allDatesMatch) {
-      const uniqueDates = [...new Set(items.map((item) => item.Date))];
       logger.warn('Earnings calendar contains multiple dates', { uniqueDates });
     }
 
     const announcementDate = allDatesMatch ? firstDate : null;
+
+    // Cron B 経路は、DBを書き換える前に応答全行の日付を検証する。
+    // 検証失敗で不正な日付の行を永続化しない。
+    if (items.length > 0) {
+      if (!allDatesMatch) {
+        throw new Error(
+          `Earnings calendar response contains multiple announcement dates: ${uniqueDates.join(', ')}`
+        );
+      }
+      if (announcementDate !== options.expectedAnnouncementDate) {
+        throw new Error(
+          `Earnings calendar target date mismatch: expected ${options.expectedAnnouncementDate}, got ${announcementDate}`
+        );
+      }
+    }
 
     logger.info('Fetched earnings calendar', {
       rowCount: items.length,
@@ -103,35 +154,60 @@ export async function syncEarningsCalendar(
     // 2. DBレコード形式に変換
     const records = items.map(toEarningsCalendarRecord);
 
-    // 3. DBに保存
-    const result = await batchUpsert(
-      supabase,
-      TABLE_NAME,
-      records,
-      ON_CONFLICT,
+    // 3. 現在のattempt所有権をjob row lockで検証し、対象日全置換、
+    // 実件数確認、coverage success公開をDBの1トランザクションで確定する。
+    const { data: committedCount, error: commitError } = await supabase.rpc(
+      'commit_earnings_calendar_attempt',
       {
-        onBatchComplete: (batchIndex, inserted, total) => {
-          logger.debug('Batch complete', { batchIndex, inserted, total });
-        },
+        p_target_date: options.expectedAnnouncementDate,
+        p_run_id: options.runId,
+        p_attempt_id: options.attemptId,
+        p_source_observed_at: sourceObservedAt,
+        p_records: records,
       }
     );
 
+    if (commitError) {
+      throw new Error(
+        `Failed to commit earnings calendar for ${options.expectedAnnouncementDate}: ${commitError.message}`
+      );
+    }
+
+    const inserted = Number(committedCount);
+    if (!Number.isSafeInteger(inserted) || inserted < 0) {
+      throw new Error(
+        `Invalid earnings calendar commit count for ${options.expectedAnnouncementDate}: ${String(committedCount)}`
+      );
+    }
+    if (inserted !== items.length) {
+      throw new Error(
+        `Earnings calendar row count mismatch for ${options.expectedAnnouncementDate}: expected ${items.length}, got ${inserted}`
+      );
+    }
+
     timer.end({
       fetched: items.length,
-      inserted: result.inserted,
-      batchCount: result.batchCount,
+      inserted,
       announcementDate,
     });
 
     return {
       fetched: items.length,
-      inserted: result.inserted,
+      inserted,
       announcementDate,
-      errors: result.errors,
+      errors: [],
+      sourceObservedAt,
     };
   } catch (error) {
     timer.endWithError(error as Error);
-    throw error;
+    if (error instanceof EarningsCalendarSyncError) {
+      throw error;
+    }
+    throw new EarningsCalendarSyncError(
+      error instanceof Error ? error.message : String(error),
+      { fetched, inserted: 0, sourceObservedAt },
+      { cause: error }
+    );
   }
 }
 

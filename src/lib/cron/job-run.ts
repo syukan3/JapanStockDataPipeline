@@ -14,6 +14,7 @@ export type JobName = 'cron_a' | 'cron_b' | 'cron_c' | 'cron-d-macro' | 'cron-e-
 
 export interface JobRunRecord {
   run_id: string;
+  attempt_id: string;
   job_name: JobName;
   target_date: string | null;
   status: JobStatus;
@@ -35,21 +36,46 @@ export interface JobRunItemRecord {
   meta: Record<string, unknown>;
 }
 
-export interface StartJobRunOptions {
-  /** ジョブ名 */
-  jobName: JobName;
+interface StartJobRunBaseOptions {
   /** 対象日付（optional） */
   targetDate?: string;
   /** メタデータ */
   meta?: Record<string, unknown>;
+  /** 指定秒数より古い running run を再取得する */
+  reclaimStaleAfterSeconds?: number;
+  /** 指定秒数より古い success run を再観測のため再取得する */
+  reclaimSuccessAfterSeconds?: number;
 }
+
+export type StartJobRunOptions =
+  | (StartJobRunBaseOptions & {
+      jobName: 'cron_b';
+      /** claimと同時にfailedへfenceするcoverage dataset */
+      coverageDataset?: 'earnings_calendar';
+    })
+  | (StartJobRunBaseOptions & {
+      jobName: Exclude<JobName, 'cron_b'>;
+      coverageDataset?: never;
+    });
 
 export interface StartJobRunResult {
   /** 実行ID */
   runId: string;
+  /** reclaimごとに更新されるfencing token */
+  attemptId?: string;
   /** エラー */
   error?: string;
+  /** エラーがDB障害ではなく実行済みを表すか */
+  alreadyExecuted?: boolean;
 }
+
+export type CompleteJobRunResult =
+  | { completed: true }
+  | {
+      completed: false;
+      reason: 'superseded' | 'db_error';
+      error?: string;
+    };
 
 /**
  * ジョブ実行を開始（job_runs に INSERT）
@@ -58,9 +84,92 @@ export async function startJobRun(
   supabase: SupabaseClient,
   options: StartJobRunOptions
 ): Promise<StartJobRunResult> {
-  const { jobName, targetDate, meta = {} } = options;
+  const {
+    jobName,
+    targetDate,
+    meta = {},
+    reclaimStaleAfterSeconds,
+    reclaimSuccessAfterSeconds,
+    coverageDataset,
+  } = options;
 
   logger.debug('Starting job run', { jobName, targetDate });
+
+  // stale running / success の再取得は、状態判定とattempt_id更新を
+  // DBの1トランザクションで行う。旧attemptは以降の確定書込みを拒否される。
+  if (
+    reclaimStaleAfterSeconds !== undefined ||
+    reclaimSuccessAfterSeconds !== undefined ||
+    coverageDataset !== undefined
+  ) {
+    if (!targetDate) {
+      return {
+        runId: '',
+        error: 'targetDate is required for atomic job claim',
+      };
+    }
+
+    const { data: claimData, error: claimError } = await supabase.rpc(
+      'claim_job_run',
+      {
+        p_job_name: jobName,
+        p_target_date: targetDate,
+        p_meta: meta,
+        p_running_stale_after_seconds: reclaimStaleAfterSeconds ?? null,
+        p_success_stale_after_seconds: reclaimSuccessAfterSeconds ?? null,
+        p_coverage_dataset: coverageDataset ?? null,
+      }
+    );
+
+    if (claimError) {
+      logger.error('Failed to atomically claim job run', {
+        jobName,
+        targetDate,
+        error: claimError,
+      });
+      return {
+        runId: '',
+        error: claimError.message ?? 'Failed to atomically claim job run',
+      };
+    }
+
+    type ClaimRow = {
+      run_id: string;
+      attempt_id: string | null;
+      claimed: boolean;
+      reason: string;
+    };
+    const claim = (Array.isArray(claimData) ? claimData[0] : claimData) as
+      | ClaimRow
+      | null;
+
+    if (!claim) {
+      return { runId: '', error: 'Atomic job claim returned no result' };
+    }
+    if (!claim.claimed) {
+      logger.info('Job run already exists and is not claimable; skipping re-run', {
+        jobName,
+        targetDate,
+        reason: claim.reason,
+      });
+      return {
+        runId: '',
+        error: 'Job already executed for this target date',
+        alreadyExecuted: true,
+      };
+    }
+    if (!claim.run_id || !claim.attempt_id) {
+      return { runId: '', error: 'Atomic job claim returned an invalid result' };
+    }
+
+    logger.info('Job run atomically claimed', {
+      jobName,
+      targetDate,
+      runId: claim.run_id,
+      reason: claim.reason,
+    });
+    return { runId: claim.run_id, attemptId: claim.attempt_id };
+  }
 
   const { data, error } = await supabase
     .from('job_runs')
@@ -79,10 +188,8 @@ export async function startJobRun(
   }
 
   // 冪等性: 同一 job_name + target_date の行が既存（uq_job_runs_job_target は target_date が
-  // 非null のときのみ有効な部分ユニークインデックス）。**失敗(failed)した前回 run のみ**を
-  // 再取得して running に戻すことで、watchdog による再ディスパッチが既存行を success へ更新でき、
-  // 収束する。既存が success / running の場合は再取得せず「実行済み」として扱い、成功監査ログを
-  // 巻き戻さない（status='failed' 条件で update 0 件 → PGRST116）。
+  // 非null のときのみ有効な部分ユニークインデックス）。既定では failed の前回 run を再取得する。
+  // 期限切れの running / success は上のatomic claim経路だけで再取得する。
   // 部分インデックスのため supabase-js の upsert(onConflict) は使えず、insert→update で実現する。
   if (error.code === '23505' && targetDate) {
     const { data: reclaimed, error: reclaimError } = await supabase
@@ -101,10 +208,14 @@ export async function startJobRun(
       .single();
 
     if (reclaimError || !reclaimed) {
-      // PGRST116 = 該当行なし（既存が success または running）→ 実行済みとして再実行しない
+      // PGRST116 = 該当行なし（既存が success または有効な running）
       if (reclaimError?.code === 'PGRST116') {
         logger.info('Job run already exists and is not failed; skipping re-run', { jobName, targetDate });
-        return { runId: '', error: 'Job already executed for this target date' };
+        return {
+          runId: '',
+          error: 'Job already executed for this target date',
+          alreadyExecuted: true,
+        };
       }
       logger.error('Failed to reclaim existing job run', { jobName, targetDate, error: reclaimError });
       return { runId: '', error: reclaimError?.message ?? 'Failed to reclaim existing job run' };
@@ -134,20 +245,60 @@ export async function completeJobRun(
   supabase: SupabaseClient,
   runId: string,
   status: 'success' | 'failed',
-  errorMessage?: string
-): Promise<void> {
+  errorMessage?: string,
+  attemptId?: string,
+  heartbeatMeta?: Record<string, unknown>
+): Promise<CompleteJobRunResult> {
   logger.debug('Completing job run', { runId, status });
+
+  const normalizedError = errorMessage
+    ? errorMessage.length > 10000
+      ? errorMessage.slice(0, 10000) + '... (truncated)'
+      : errorMessage
+    : undefined;
+
+  if (attemptId) {
+    const { data, error } = await supabase.rpc('complete_job_run_attempt', {
+      p_run_id: runId,
+      p_attempt_id: attemptId,
+      p_status: status,
+      p_error_message: normalizedError ?? null,
+      p_heartbeat_meta: heartbeatMeta ?? {},
+    });
+
+    if (error) {
+      logger.error('Failed to complete fenced job run', {
+        runId,
+        attemptId,
+        status,
+        error,
+      });
+      return {
+        completed: false,
+        reason: 'db_error',
+        error: error.message ?? 'Failed to complete fenced job run',
+      };
+    }
+    if (data !== true) {
+      logger.warn('Job completion rejected for superseded attempt', {
+        runId,
+        attemptId,
+        status,
+      });
+      return { completed: false, reason: 'superseded' };
+    }
+
+    logger.info('Fenced job run completed', { runId, attemptId, status });
+    return { completed: true };
+  }
 
   const updateData: Partial<JobRunRecord> = {
     status,
     finished_at: new Date().toISOString(),
   };
 
-  if (errorMessage) {
-    // エラーメッセージが長すぎる場合は切り詰める（DB制限考慮）
-    updateData.error_message = errorMessage.length > 10000
-      ? errorMessage.slice(0, 10000) + '... (truncated)'
-      : errorMessage;
+  if (normalizedError) {
+    updateData.error_message = normalizedError;
   }
 
   const { error } = await supabase
@@ -157,10 +308,15 @@ export async function completeJobRun(
 
   if (error) {
     logger.error('Failed to complete job run', { runId, status, error });
-    return;
+    return {
+      completed: false,
+      reason: 'db_error',
+      error: error.message ?? 'Failed to complete job run',
+    };
   }
 
   logger.info('Job run completed', { runId, status });
+  return { completed: true };
 }
 
 /**
