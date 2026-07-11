@@ -75,7 +75,7 @@ describe('syncEarningsCalendar fenced publish', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it('期待日と異なるAPI行はpublish RPCを呼ばない', async () => {
+  it('期待日より未来のAPI行はpublish RPCを呼ばない', async () => {
     await expect(
       syncEarningsCalendar(options([item('2024-01-19', '13010')]))
     ).rejects.toThrow(
@@ -83,6 +83,28 @@ describe('syncEarningsCalendar fenced publish', () => {
     );
 
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('期待日より過去のAPI行（新規disclosure未確定の閑散期）は対象日を0件でpublishする', async () => {
+    const result = await syncEarningsCalendar(options([item('2024-01-10', '13010')]));
+
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'commit_earnings_calendar_attempt',
+      {
+        p_target_date: TARGET_DATE,
+        p_run_id: RUN_ID,
+        p_attempt_id: ATTEMPT_ID,
+        p_source_observed_at: expect.any(String),
+        p_records: [],
+      }
+    );
+    expect(result).toMatchObject({
+      fetched: 1,
+      inserted: 0,
+      announcementDate: null,
+      errors: [],
+      sourceObservedAt: expect.any(String),
+    });
   });
 
   it('複数日を含むAPI行はpublish RPCを呼ばない', async () => {

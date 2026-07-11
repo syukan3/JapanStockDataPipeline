@@ -128,7 +128,8 @@ export async function syncEarningsCalendar(
       logger.warn('Earnings calendar contains multiple dates', { uniqueDates });
     }
 
-    const announcementDate = allDatesMatch ? firstDate : null;
+    let announcementDate = allDatesMatch ? firstDate : null;
+    let itemsForTargetDate = items;
 
     // Cron B 経路は、DBを書き換える前に応答全行の日付を検証する。
     // 検証失敗で不正な日付の行を永続化しない。
@@ -139,9 +140,25 @@ export async function syncEarningsCalendar(
         );
       }
       if (announcementDate !== options.expectedAnnouncementDate) {
-        throw new Error(
-          `Earnings calendar target date mismatch: expected ${options.expectedAnnouncementDate}, got ${announcementDate}`
-        );
+        if (announcementDate !== null && announcementDate < options.expectedAnnouncementDate) {
+          // J-Quantsは「翌営業日」分を返す想定だが、決算発表の閑散期など新しい確定
+          // スケジュールがまだ無い間は、直近の既知バッチ（既に取り込み済みの過去日）
+          // をそのまま返してくる。過去日データを対象日のcoverageとして誤登録しない
+          // よう、対象日は0件（新規disclosureなし）としてpublishする。
+          logger.info(
+            'Earnings calendar has no disclosures newer than the last known date; treating target date as empty',
+            {
+              expectedAnnouncementDate: options.expectedAnnouncementDate,
+              latestKnownDate: announcementDate,
+            }
+          );
+          itemsForTargetDate = [];
+          announcementDate = null;
+        } else {
+          throw new Error(
+            `Earnings calendar target date mismatch: expected ${options.expectedAnnouncementDate}, got ${announcementDate}`
+          );
+        }
       }
     }
 
@@ -152,7 +169,7 @@ export async function syncEarningsCalendar(
     });
 
     // 2. DBレコード形式に変換
-    const records = items.map(toEarningsCalendarRecord);
+    const records = itemsForTargetDate.map(toEarningsCalendarRecord);
 
     // 3. 現在のattempt所有権をjob row lockで検証し、対象日全置換、
     // 実件数確認、coverage success公開をDBの1トランザクションで確定する。
@@ -179,9 +196,9 @@ export async function syncEarningsCalendar(
         `Invalid earnings calendar commit count for ${options.expectedAnnouncementDate}: ${String(committedCount)}`
       );
     }
-    if (inserted !== items.length) {
+    if (inserted !== itemsForTargetDate.length) {
       throw new Error(
-        `Earnings calendar row count mismatch for ${options.expectedAnnouncementDate}: expected ${items.length}, got ${inserted}`
+        `Earnings calendar row count mismatch for ${options.expectedAnnouncementDate}: expected ${itemsForTargetDate.length}, got ${inserted}`
       );
     }
 
