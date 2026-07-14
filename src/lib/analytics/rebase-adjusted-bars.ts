@@ -11,9 +11,9 @@
 export type RebaseMode = 'detect' | 'codes' | 'all';
 
 export interface RebaseArgs {
-  /** detect: 指定日（既定は最新 trade_date）の factor≠1 銘柄のみ / codes: 指定銘柄を強制 / all: 履歴に factor≠1 を持つ全銘柄 */
+  /** detect: 検知窓（終端日から DETECT_LOOKBACK_DAYS 遡る）の factor≠1 銘柄のみ / codes: 指定銘柄を強制 / all: 履歴に factor≠1 を持つ全銘柄 */
   mode: RebaseMode;
-  /** detect モードの対象日（YYYY-MM-DD）。未指定なら最新 trade_date */
+  /** detect モードの検知窓の終端日（YYYY-MM-DD）。未指定なら最新 trade_date */
   date?: string;
   /** codes モードの対象銘柄 */
   codes?: string[];
@@ -37,6 +37,14 @@ export interface RebaseResult {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * 既定検知の lookback 窓（暦日）。
+ * Cron A は forward-fill 方式で障害後に複数日を一括取り込みするため、
+ * 最新日だけの走査では catch-up 範囲の途中にある権利落ち日を見逃す。
+ * 窓で拾い直しても rebase は冪等（値が変わらなければ0行更新）なので再検知は無害。
+ */
+export const DETECT_LOOKBACK_DAYS = 7;
+
+/**
  * CLI 引数をパースする（process.argv.slice(2) を渡す）
  *
  * - `--code` と `--all` は排他
@@ -54,6 +62,7 @@ export function parseRebaseArgs(argv: string[]): RebaseArgs {
     } else if (arg === '--all') {
       all = true;
     } else if (arg.startsWith('--date=')) {
+      // 検知窓の終端日（この日から DETECT_LOOKBACK_DAYS 遡って検知する）
       const value = arg.slice('--date='.length);
       if (!DATE_RE.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
         throw new Error(`--date は YYYY-MM-DD 形式で指定してください: ${value}`);
@@ -104,20 +113,38 @@ export async function getLatestTradeDate(core: CoreClient): Promise<string> {
   return (data as { trade_date: string }).trade_date;
 }
 
-/** 指定日の分割・併合イベント（factor≠1）を検知する */
-export async function detectEventsOnDate(
+/** 暦日ベースで days 日前の日付（YYYY-MM-DD）を返す */
+export function subtractDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * 終端日から lookbackDays 遡る窓内の分割・併合イベント（factor≠1）を検知する。
+ * 単一日走査だと forward-fill の catch-up（複数日一括取り込み）中の権利落ち日を
+ * 見逃すため、窓で走査する。部分インデックス前提で安価。
+ * 翌日以降の実行で同じイベントが再検知されるのは冪等（0行更新）なので許容。
+ */
+export async function detectEventsInWindow(
   core: CoreClient,
-  date: string
+  endDate: string,
+  lookbackDays: number = DETECT_LOOKBACK_DAYS
 ): Promise<AdjustmentEvent[]> {
+  const startDate = subtractDays(endDate, lookbackDays);
   const { data, error } = await core
     .from('equity_bar_daily')
     .select('local_code, trade_date, adjustment_factor')
-    .eq('trade_date', date)
+    .gte('trade_date', startDate)
+    .lte('trade_date', endDate)
     .not('adjustment_factor', 'is', null)
     .neq('adjustment_factor', 1)
-    .order('local_code', { ascending: true });
+    .order('local_code', { ascending: true })
+    .order('trade_date', { ascending: true });
   if (error) {
-    throw new Error(`Failed to detect adjustment events on ${date}: ${error.message}`);
+    throw new Error(
+      `Failed to detect adjustment events in ${startDate}..${endDate}: ${error.message}`
+    );
   }
   return normalizeEvents((data as AdjustmentEvent[] | null) ?? []);
 }
