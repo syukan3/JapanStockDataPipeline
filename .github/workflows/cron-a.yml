@@ -83,11 +83,24 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/cron-a-direct.ts equity_master
 
+      # 株式分割・併合の adj_* 再基準化（jquants_core.rebase_adjusted_bars）。
+      # J-Quants の調整後株価は遡及型のため、権利落ち日を検知した銘柄の全履歴 adj_* を
+      # raw × 累積調整係数でローカル再計算する。分割の無い日は検知0件で即終了（冪等）。
+      # analytics 再計算より前に必ず実行し、再基準化済みデータで指標を計算させる。
+      - name: Rebase adjusted bars (splits/reverse splits)
+        id: rebase
+        if: always() && steps.equity_bars.outcome == 'success'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/rebase-adjusted-bars.ts
+
       # 生データ(株価/財務/マスタ)確定後に派生メトリクスを再計算
       # refresh_stock_metrics は equity_bar_daily / equity_master / financial_disclosure を参照するため、
       # 3つ全ての同期が成功した時のみ実行する（部分株価や stale な財務での再計算・公開を防ぐ）。
+      # rebase 失敗時もスキップ（分割日に未調整の adj で指標を再計算・公開しない）。
       - name: Refresh factor metrics (analytics.stock_metrics)
-        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success' && steps.financial.outcome == 'success'
+        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success' && steps.financial.outcome == 'success' && steps.rebase.outcome == 'success'
         run: |
           curl -X POST "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}/rest/v1/rpc/refresh_stock_metrics" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
@@ -100,8 +113,9 @@ jobs:
       # テクニカル指標スナップショットを再計算（analytics.technical_metrics）。
       # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま（誤アラート防止）。
       # 株価(equity_bars)とマスタ(equity_master)の両方が成功した時のみ実行（古い/部分株価での公開を防ぐ）。
+      # rebase 失敗時もスキップ（分割日に未調整の adj でスナップショットを公開しない）。
       - name: Refresh technical metrics (analytics.technical_metrics)
-        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success'
+        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success' && steps.rebase.outcome == 'success'
         continue-on-error: true
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -113,7 +127,7 @@ jobs:
       # breadth（騰落数/新高値新安値/売買代金）は当日株価とマスタに依存するため
       # technical と同じゲート条件で実行する。
       - name: Refresh market indicators - breadth
-        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success'
+        if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success' && steps.rebase.outcome == 'success'
         continue-on-error: true
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
