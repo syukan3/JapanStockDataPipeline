@@ -45,7 +45,7 @@ import {
 const D_20260706 = new Date('2026-07-06T00:00:00+09:00').getTime();
 const D_20260703 = new Date('2026-07-03T00:00:00+09:00').getTime();
 
-/** 実データの列構造（35列）: [epoch, 終値, 売買高, '', '', 値上, 値下, 騰落レシオ, 新高, 新安, 計, 空売り比率, PER, PBR, 利回り, ...] */
+/** 実データの列構造（35列）: [epoch, 終値, 売買高, '', '', 値上, 値下, 騰落レシオ, 新高, 新安, 計, 日経VI, PER, PBR, 利回り, ...] */
 function daily2Row(overrides: Partial<Record<number, unknown>> = {}): unknown[] {
   const row: unknown[] = [
     D_20260706, 69737.69, 2058, '', '', 1142, 384, 116.37, 106, 3, 1526, 37.36, 18.58, 1.96, 1.49,
@@ -87,14 +87,14 @@ describe('epochMsToJstDate', () => {
 });
 
 describe('parseNikkei225jpDaily', () => {
-  it('実データ相当の列マッピング（終値/PER/空売り比率/参照列）', () => {
+  it('実データ相当の列マッピング（終値/PER/日経VI/参照列）', () => {
     const rows = parseNikkei225jpDaily(daily2Payload([daily2Row()]));
     expect(rows).toHaveLength(1);
     const r = rows[0];
     expect(r.date).toBe('2026-07-06');
     expect(r.nikkeiClose).toBe(69737.69);
     expect(r.per).toBe(18.58);
-    expect(r.shortSellingRatio).toBe(37.36);
+    expect(r.nikkeiVi).toBe(37.36);
     expect(r.refAdvDecRatio).toBe(116.37);
     expect(r.refNewHighs).toBe(106);
     expect(r.refNewLows).toBe(3);
@@ -109,14 +109,24 @@ describe('parseNikkei225jpDaily', () => {
   it('値域チェック逸脱はその列のみ null（他列は保持）', () => {
     const rows = parseNikkei225jpDaily(daily2Payload([daily2Row({ 12: 999, 11: 37.36 })]));
     expect(rows[0].per).toBeNull(); // PER=999 は値域外
-    expect(rows[0].shortSellingRatio).toBe(37.36);
+    expect(rows[0].nikkeiVi).toBe(37.36);
     expect(rows[0].nikkeiClose).toBe(69737.69);
+  });
+
+  it('日経VIの値域(8〜100): 暴落日の高値を許容し、範囲外はnull化', () => {
+    // 2024-08-05 の 70.69（旧short比率レンジ max80 内だが新レンジでも許容）
+    expect(parseNikkei225jpDaily(daily2Payload([daily2Row({ 11: 70.69 })]))[0].nikkeiVi).toBe(70.69);
+    // 2008-10-31 の過去最高 91.45 は旧max(80)では落ちたが新レンジ(max100)で許容
+    expect(parseNikkei225jpDaily(daily2Payload([daily2Row({ 11: 91.45 })]))[0].nikkeiVi).toBe(91.45);
+    // 100超・8未満は範囲外としてnull化
+    expect(parseNikkei225jpDaily(daily2Payload([daily2Row({ 11: 120 })]))[0].nikkeiVi).toBeNull();
+    expect(parseNikkei225jpDaily(daily2Payload([daily2Row({ 11: 5 })]))[0].nikkeiVi).toBeNull();
   });
 
   it('空文字列の値は null として扱う', () => {
     const rows = parseNikkei225jpDaily(daily2Payload([daily2Row({ 11: '', 12: '' })]));
     expect(rows[0].per).toBeNull();
-    expect(rows[0].shortSellingRatio).toBeNull();
+    expect(rows[0].nikkeiVi).toBeNull();
   });
 });
 

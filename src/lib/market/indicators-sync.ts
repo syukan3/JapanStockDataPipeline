@@ -30,7 +30,7 @@ export interface IndicatorRow {
   as_of_date: string;
   nikkei_close: number | null;
   nikkei_per: number | null;
-  short_selling_ratio: number | null;
+  nikkei_vi: number | null;
   margin_pl_ratio: number | null;
   advancers: number | null;
   decliners: number | null;
@@ -60,7 +60,7 @@ export function normalizeRow(r: IndicatorRow): IndicatorRow {
     as_of_date: r.as_of_date,
     nikkei_close: toNum(r.nikkei_close),
     nikkei_per: toNum(r.nikkei_per),
-    short_selling_ratio: toNum(r.short_selling_ratio),
+    nikkei_vi: toNum(r.nikkei_vi),
     margin_pl_ratio: toNum(r.margin_pl_ratio),
     advancers: toNum(r.advancers),
     decliners: toNum(r.decliners),
@@ -80,7 +80,7 @@ export function emptyRow(date: string): IndicatorRow {
     as_of_date: date,
     nikkei_close: null,
     nikkei_per: null,
-    short_selling_ratio: null,
+    nikkei_vi: null,
     margin_pl_ratio: null,
     advancers: null,
     decliners: null,
@@ -179,7 +179,7 @@ export async function fillYahoo(
 }
 
 // ============================================================
-// daily2（PER・空売り比率。Yahoo欠損日の終値フォールバックも担当）
+// daily2（PER・日経VI。Yahoo欠損日の終値フォールバックも担当）
 // ============================================================
 export async function fillDaily2(
   analytics: Client,
@@ -190,7 +190,7 @@ export async function fillDaily2(
 ): Promise<Record<string, unknown>> {
   const pending = businessDays.filter((d) => {
     const r = rowMap.get(d);
-    return !r || r.nikkei_per == null || r.short_selling_ratio == null || r.nikkei_close == null;
+    return !r || r.nikkei_per == null || r.nikkei_vi == null || r.nikkei_close == null;
   });
   if (pending.length === 0) return { pending: 0, upserted: 0 };
   const rows = prefetched ?? (await fetchNikkei225jpDaily());
@@ -201,9 +201,9 @@ export async function fillDaily2(
   let upserted = 0;
   upserted += await upsertRows(analytics, plan.perRows.map((r) => ({ ...r, ...stamp })), dryRun);
   for (const u of plan.perRows) getOrCreate(rowMap, u.as_of_date).nikkei_per = u.nikkei_per;
-  upserted += await upsertRows(analytics, plan.shortRows.map((r) => ({ ...r, ...stamp })), dryRun);
-  for (const u of plan.shortRows) {
-    getOrCreate(rowMap, u.as_of_date).short_selling_ratio = u.short_selling_ratio;
+  upserted += await upsertRows(analytics, plan.viRows.map((r) => ({ ...r, ...stamp })), dryRun);
+  for (const u of plan.viRows) {
+    getOrCreate(rowMap, u.as_of_date).nikkei_vi = u.nikkei_vi;
   }
   upserted += await upsertRows(analytics, plan.closeRows.map((r) => ({ ...r, ...stamp })), dryRun);
   for (const u of plan.closeRows) getOrCreate(rowMap, u.as_of_date).nikkei_close = u.nikkei_close;
@@ -230,18 +230,18 @@ export function planDaily2Updates(
     date: string;
     nikkeiClose: number | null;
     per: number | null;
-    shortSellingRatio: number | null;
+    nikkeiVi: number | null;
   }>
 ): {
   perRows: Array<{ as_of_date: string; nikkei_per: number }>;
-  shortRows: Array<{ as_of_date: string; short_selling_ratio: number }>;
+  viRows: Array<{ as_of_date: string; nikkei_vi: number }>;
   closeRows: Array<{ as_of_date: string; nikkei_close: number }>;
   noSource: number;
   closeMismatch: number;
 } {
   const srcMap = new Map(srcRows.map((r) => [r.date, r]));
   const perRows: Array<{ as_of_date: string; nikkei_per: number }> = [];
-  const shortRows: Array<{ as_of_date: string; short_selling_ratio: number }> = [];
+  const viRows: Array<{ as_of_date: string; nikkei_vi: number }> = [];
   const closeRows: Array<{ as_of_date: string; nikkei_close: number }> = [];
   let closeMismatch = 0;
   let noSource = 0;
@@ -274,15 +274,15 @@ export function planDaily2Updates(
       perRows.push({ as_of_date: date, nikkei_per: src.per });
       updatedAny = true;
     }
-    if (row.short_selling_ratio == null && src.shortSellingRatio != null) {
-      shortRows.push({ as_of_date: date, short_selling_ratio: src.shortSellingRatio });
+    if (row.nikkei_vi == null && src.nikkeiVi != null) {
+      viRows.push({ as_of_date: date, nikkei_vi: src.nikkeiVi });
       updatedAny = true;
     }
-    if (!updatedAny && (row.nikkei_per == null || row.short_selling_ratio == null)) {
+    if (!updatedAny && (row.nikkei_per == null || row.nikkei_vi == null)) {
       noSource++;
     }
   }
-  return { perRows, shortRows, closeRows, noSource, closeMismatch };
+  return { perRows, viRows, closeRows, noSource, closeMismatch };
 }
 
 // ============================================================

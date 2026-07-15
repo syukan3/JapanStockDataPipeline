@@ -27,8 +27,8 @@ function rowWith(date: string, patch: Partial<IndicatorRow>): IndicatorRow {
   return { ...emptyRow(date), ...patch };
 }
 
-function src(date: string, patch: Partial<{ nikkeiClose: number | null; per: number | null; shortSellingRatio: number | null }> = {}) {
-  return { date, nikkeiClose: 40000, per: 18.0, shortSellingRatio: 40.0, ...patch };
+function src(date: string, patch: Partial<{ nikkeiClose: number | null; per: number | null; nikkeiVi: number | null }> = {}) {
+  return { date, nikkeiClose: 40000, per: 18.0, nikkeiVi: 22.5, ...patch };
 }
 
 describe('planDaily2Updates', () => {
@@ -38,8 +38,8 @@ describe('planDaily2Updates', () => {
     ]);
     const plan = planDaily2Updates(['2026-07-01'], rowMap, [src('2026-07-01')]);
     expect(plan.perRows).toEqual([]); // 既にPERあり → 触らない
-    expect(plan.shortRows).toEqual([
-      { as_of_date: '2026-07-01', short_selling_ratio: 40.0 },
+    expect(plan.viRows).toEqual([
+      { as_of_date: '2026-07-01', nikkei_vi: 22.5 },
     ]);
   });
 
@@ -47,10 +47,10 @@ describe('planDaily2Updates', () => {
     const rowMap = new Map([
       ['2026-07-01', rowWith('2026-07-01', { nikkei_close: 40000, nikkei_per: 18.5 })],
     ]);
-    // PERが値域外でnull化されたソース: shortだけ更新され、既存PERは無傷
+    // PERが値域外でnull化されたソース: VIだけ更新され、既存PERは無傷
     const plan = planDaily2Updates(['2026-07-01'], rowMap, [src('2026-07-01', { per: null })]);
     expect(plan.perRows).toEqual([]);
-    expect(plan.shortRows).toHaveLength(1);
+    expect(plan.viRows).toHaveLength(1);
     expect(rowMap.get('2026-07-01')!.nikkei_per).toBe(18.5);
   });
 
@@ -63,7 +63,7 @@ describe('planDaily2Updates', () => {
     ]);
     expect(plan.closeMismatch).toBe(1);
     expect(plan.perRows).toEqual([]);
-    expect(plan.shortRows).toEqual([]);
+    expect(plan.viRows).toEqual([]);
   });
 
   it('Yahoo欠損日はdaily2終値でフォールバック', () => {
@@ -71,7 +71,7 @@ describe('planDaily2Updates', () => {
     const plan = planDaily2Updates(['2026-07-01'], rowMap, [src('2026-07-01')]);
     expect(plan.closeRows).toEqual([{ as_of_date: '2026-07-01', nikkei_close: 40000 }]);
     expect(plan.perRows).toHaveLength(1);
-    expect(plan.shortRows).toHaveLength(1);
+    expect(plan.viRows).toHaveLength(1);
   });
 
   it('ソースに日付が無い場合は noSource としてカウント', () => {

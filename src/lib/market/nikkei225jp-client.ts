@@ -1,17 +1,20 @@
 /**
- * nikkei225jp.com データ取得クライアント（日経平均PER・空売り比率・信用評価損益率）
+ * nikkei225jp.com データ取得クライアント（日経平均PER・日経VI・信用評価損益率）
  *
  * @description
  * 以下の指標は無料の公式機械可読ソースが存在しないため、第三者サイト
  * nikkei225jp.com が配信する Highcharts 用 JSON を防御的にパースして利用する。
  * - 日経平均PER（日次・公式CSVは日次3年分のみ＋Cloudflare障壁）
- * - 空売り比率（JPX公式はPDFのみ / J-Quants は Standard 以上）
+ * - 日経VI（日経平均ボラティリティー・インデックス。日経公式は日次CSVに制約）
  * - 信用評価損益率（週次・二市場。公式の無料バルクなし）
  *
  * ソース仕様（2026-07-06 実レスポンスで検証済み）:
  * - daily2.json: `var DAILY = [[epoch_ms, 日経終値, ...], ...]`、35列・2009-06〜当日。
  *   col[1]=日経終値, col[7]=騰落レシオ(参照用), col[8]/col[9]=新高値/新安値(参照用),
- *   col[11]=空売り比率[%], col[12]=PER, col[13]=PBR, col[19]=売買代金[百万円](参照用)
+ *   col[11]=日経VI[ポイント], col[12]=PER, col[13]=PBR, col[19]=売買代金[百万円](参照用)
+ *   ※ col[11] は 2026-07-15 の設計調査まで「空売り比率」と誤ラベルされていた。史実値
+ *      (2024-08-05=70.69/2020-03-16=60.67) が日経VIと一致し空売り比率(常時35〜50%)では
+ *      説明できないため日経VIと確定（migration 00096 で列を rename）。
  * - dailyweek2.json: 24列・同一日付軸。週次列は週末営業日のみ非空。col[7]=信用評価損益率[%]。
  *   取得には Referer ヘッダが必須（無いと404）。
  *
@@ -53,7 +56,8 @@ function getRateLimiter(): RateLimiter {
 const RANGE_CHECKS = {
   nikkeiClose: { min: 5000, max: 200000 },
   per: { min: 5, max: 120 }, // リーマン直後は40超の実績あり
-  shortSellingRatio: { min: 10, max: 80 },
+  // 日経VI: 平常20前後・過去最高は2008-10-31の91.45。ザラ場スパイクを許容して緩め。
+  nikkeiVi: { min: 8, max: 100 },
   marginPlRatio: { min: -50, max: 15 },
 } as const;
 
@@ -64,8 +68,8 @@ export interface Nikkei225jpDailyRow {
   nikkeiClose: number | null;
   /** 日経平均PER */
   per: number | null;
-  /** 空売り比率[%] */
-  shortSellingRatio: number | null;
+  /** 日経VI（日経平均ボラティリティー・インデックス）終値[ポイント] */
+  nikkeiVi: number | null;
   /** 参照用（自前計算の検証にのみ使用・保存しない） */
   refAdvDecRatio: number | null;
   refNewHighs: number | null;
@@ -139,10 +143,10 @@ export function parseNikkei225jpDaily(text: string): Nikkei225jpDailyRow[] {
     if (epochMs == null) continue;
     const nikkeiClose = inRange(toNumber(row[1]), RANGE_CHECKS.nikkeiClose);
     const per = inRange(toNumber(row[12]), RANGE_CHECKS.per);
-    const shortSellingRatio = inRange(toNumber(row[11]), RANGE_CHECKS.shortSellingRatio);
+    const nikkeiVi = inRange(toNumber(row[11]), RANGE_CHECKS.nikkeiVi);
     if (
       (toNumber(row[12]) != null && per == null) ||
-      (toNumber(row[11]) != null && shortSellingRatio == null)
+      (toNumber(row[11]) != null && nikkeiVi == null)
     ) {
       rangeRejected++;
     }
@@ -150,7 +154,7 @@ export function parseNikkei225jpDaily(text: string): Nikkei225jpDailyRow[] {
       date: epochMsToJstDate(epochMs),
       nikkeiClose,
       per,
-      shortSellingRatio,
+      nikkeiVi,
       refAdvDecRatio: toNumber(row[7]),
       refNewHighs: toNumber(row[8]),
       refNewLows: toNumber(row[9]),
@@ -213,7 +217,7 @@ async function fetchText(url: string, referer?: string): Promise<string> {
   return res.text();
 }
 
-/** daily2.json（PER・空売り比率・参照値）を取得してパース */
+/** daily2.json（PER・日経VI・参照値）を取得してパース */
 export async function fetchNikkei225jpDaily(): Promise<Nikkei225jpDailyRow[]> {
   logger.info('Fetching nikkei225jp daily2.json');
   const text = await fetchText(DAILY2_URL, REFERER);
