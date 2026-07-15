@@ -16,7 +16,7 @@
 import { createLogger } from '../utils/logger';
 import { batchUpsert } from '../utils/batch';
 import { computeAdvDecRatio25 } from '../analytics/market-breadth';
-import { fetchNikkeiDailyCloses } from './yahoo-chart-client';
+import { fetchNikkeiDailyBars, type DailyBar } from './yahoo-chart-client';
 import { fetchNikkei225jpDaily, fetchNikkei225jpWeekly } from './nikkei225jp-client';
 
 const logger = createLogger({ module: 'market-indicators-sync' });
@@ -29,6 +29,9 @@ export const CLOSE_TOLERANCE = 0.005;
 export interface IndicatorRow {
   as_of_date: string;
   nikkei_close: number | null;
+  nikkei_open: number | null;
+  nikkei_high: number | null;
+  nikkei_low: number | null;
   nikkei_per: number | null;
   nikkei_vi: number | null;
   short_selling_ratio_restricted: number | null;
@@ -63,6 +66,9 @@ export function normalizeRow(r: IndicatorRow): IndicatorRow {
   return {
     as_of_date: r.as_of_date,
     nikkei_close: toNum(r.nikkei_close),
+    nikkei_open: toNum(r.nikkei_open),
+    nikkei_high: toNum(r.nikkei_high),
+    nikkei_low: toNum(r.nikkei_low),
     nikkei_per: toNum(r.nikkei_per),
     nikkei_vi: toNum(r.nikkei_vi),
     short_selling_ratio_restricted: toNum(r.short_selling_ratio_restricted),
@@ -87,6 +93,9 @@ export function emptyRow(date: string): IndicatorRow {
   return {
     as_of_date: date,
     nikkei_close: null,
+    nikkei_open: null,
+    nikkei_high: null,
+    nikkei_low: null,
     nikkei_per: null,
     nikkei_vi: null,
     short_selling_ratio_restricted: null,
@@ -162,7 +171,7 @@ export async function upsertRows(
 }
 
 // ============================================================
-// yahoo（日経平均終値）
+// yahoo（日経平均OHLC。close と open/high/low は列単位で独立に埋める）
 // ============================================================
 export async function fillYahoo(
   analytics: Client,
@@ -170,24 +179,85 @@ export async function fillYahoo(
   rowMap: Map<string, IndicatorRow>,
   dryRun: boolean
 ): Promise<Record<string, unknown>> {
-  const pending = businessDays.filter((d) => rowMap.get(d)?.nikkei_close == null);
+  const pending = businessDays.filter((d) => {
+    const r = rowMap.get(d);
+    return (
+      !r ||
+      r.nikkei_close == null ||
+      r.nikkei_open == null ||
+      r.nikkei_high == null ||
+      r.nikkei_low == null
+    );
+  });
   if (pending.length === 0) return { pending: 0, upserted: 0 };
-  const closes = await fetchNikkeiDailyCloses(pending[0], pending[pending.length - 1]);
-  const closeMap = new Map(closes.map((c) => [c.date, c.close]));
-  const upserts: Array<{ as_of_date: string; nikkei_close: number; updated_at: string }> = [];
+  const bars = await fetchNikkeiDailyBars(pending[0], pending[pending.length - 1]);
+  const plan = planYahooUpdates(pending, rowMap, bars);
+  if (plan.missing.length > 0) {
+    logger.warn('Yahoo: 一部日付が取得できず', {
+      count: plan.missing.length,
+      sample: plan.missing.slice(0, 5),
+    });
+  }
+  const stamp = { updated_at: new Date().toISOString() };
+  // 列ごとに同一shapeでupsert（既存非NULL列へnullを送らない = 部分upsertの列保護）。
+  // rowMap への反映は各グループの upsert 成功後（書き込み失敗時に未永続化の値を
+  // 後続グループへ伝播させない）。
+  let upserted = 0;
+  upserted += await upsertRows(analytics, plan.closeRows.map((r) => ({ ...r, ...stamp })), dryRun);
+  for (const u of plan.closeRows) getOrCreate(rowMap, u.as_of_date).nikkei_close = u.nikkei_close;
+  upserted += await upsertRows(analytics, plan.openRows.map((r) => ({ ...r, ...stamp })), dryRun);
+  for (const u of plan.openRows) getOrCreate(rowMap, u.as_of_date).nikkei_open = u.nikkei_open;
+  upserted += await upsertRows(analytics, plan.highRows.map((r) => ({ ...r, ...stamp })), dryRun);
+  for (const u of plan.highRows) getOrCreate(rowMap, u.as_of_date).nikkei_high = u.nikkei_high;
+  upserted += await upsertRows(analytics, plan.lowRows.map((r) => ({ ...r, ...stamp })), dryRun);
+  for (const u of plan.lowRows) getOrCreate(rowMap, u.as_of_date).nikkei_low = u.nikkei_low;
+  return { pending: pending.length, upserted, missing: plan.missing.length };
+}
+
+/**
+ * Yahoo ソースから更新payloadを列単位で組み立てる（純関数・テスト対象）
+ *
+ * - 各列は「保存値がNULLかつソースに値がある」場合のみ更新対象（null上書き防止）。
+ *   OHLC には close と独立の null穴があり得るため、close/open/high/low を別グループにする
+ *   （終値のみの日を再取得し続けても、既存 close を触らず OHLC だけ埋められる）。
+ * - rowMap は読み取りのみ（反映は呼び出し側が upsert 成功後に行う）
+ */
+export function planYahooUpdates(
+  pending: string[],
+  rowMap: Map<string, IndicatorRow>,
+  bars: DailyBar[]
+): {
+  closeRows: Array<{ as_of_date: string; nikkei_close: number }>;
+  openRows: Array<{ as_of_date: string; nikkei_open: number }>;
+  highRows: Array<{ as_of_date: string; nikkei_high: number }>;
+  lowRows: Array<{ as_of_date: string; nikkei_low: number }>;
+  missing: string[];
+} {
+  const barMap = new Map(bars.map((b) => [b.date, b]));
+  const closeRows: Array<{ as_of_date: string; nikkei_close: number }> = [];
+  const openRows: Array<{ as_of_date: string; nikkei_open: number }> = [];
+  const highRows: Array<{ as_of_date: string; nikkei_high: number }> = [];
+  const lowRows: Array<{ as_of_date: string; nikkei_low: number }> = [];
+  const missing: string[] = [];
   for (const date of pending) {
-    const close = closeMap.get(date);
-    if (close == null) continue;
-    upserts.push({ as_of_date: date, nikkei_close: close, updated_at: new Date().toISOString() });
+    const bar = barMap.get(date);
+    if (!bar) {
+      missing.push(date);
+      continue;
+    }
+    const row = rowMap.get(date) ?? emptyRow(date);
+    if (row.nikkei_close == null) closeRows.push({ as_of_date: date, nikkei_close: bar.close });
+    if (row.nikkei_open == null && bar.open != null) {
+      openRows.push({ as_of_date: date, nikkei_open: bar.open });
+    }
+    if (row.nikkei_high == null && bar.high != null) {
+      highRows.push({ as_of_date: date, nikkei_high: bar.high });
+    }
+    if (row.nikkei_low == null && bar.low != null) {
+      lowRows.push({ as_of_date: date, nikkei_low: bar.low });
+    }
   }
-  const missing = pending.filter((d) => !closeMap.has(d));
-  if (missing.length > 0) {
-    logger.warn('Yahoo: 一部日付が取得できず', { count: missing.length, sample: missing.slice(0, 5) });
-  }
-  // rowMap への反映は upsert 成功後（書き込み失敗時に未永続化の値を後続グループへ伝播させない）
-  const upserted = await upsertRows(analytics, upserts, dryRun);
-  for (const u of upserts) getOrCreate(rowMap, u.as_of_date).nikkei_close = u.nikkei_close;
-  return { pending: pending.length, upserted, missing: missing.length };
+  return { closeRows, openRows, highRows, lowRows, missing };
 }
 
 // ============================================================

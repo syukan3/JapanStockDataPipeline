@@ -11,7 +11,7 @@
  *      → advancers/decliners/unchanged/new_highs/new_lows/prime_turnover_value
  *      → pct_above_sma25/pct_above_sma200（SMA上回り比率。調整後終値ベース）
  *      → adv_dec_ratio_25d は保存済みの騰落数25日窓から導出
- *   2. yahoo:   nikkei_close（^N225 終値）
+ *   2. yahoo:   nikkei_close / nikkei_open / nikkei_high / nikkei_low（^N225 日足）
  *   3. daily2:  nikkei_per / nikkei_vi / 空売り比率2成分（nikkei225jp.com。終値をYahoo保存値と突合）
  *   4. weekly:  margin_pl_ratio（nikkei225jp.com 週次。ソース側に存在する日付のみ対象）
  *   5. derived: nikkei_eps(=close/per) / topix_close / nt_ratio

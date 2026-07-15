@@ -19,9 +19,11 @@ vi.mock('@/lib/utils/logger', () => ({
 import {
   planDaily2Updates,
   planRatioUpserts,
+  planYahooUpdates,
   emptyRow,
   type IndicatorRow,
 } from '@/lib/market/indicators-sync';
+import type { DailyBar } from '@/lib/market/yahoo-chart-client';
 
 function rowWith(date: string, patch: Partial<IndicatorRow>): IndicatorRow {
   return { ...emptyRow(date), ...patch };
@@ -117,6 +119,53 @@ describe('planDaily2Updates', () => {
     const rowMap = new Map<string, IndicatorRow>();
     const plan = planDaily2Updates(['2026-07-01'], rowMap, []);
     expect(plan.noSource).toBe(1);
+  });
+});
+
+describe('planYahooUpdates', () => {
+  function bar(date: string, patch: Partial<DailyBar> = {}): DailyBar {
+    return { date, close: 40000, open: 39800, high: 40100, low: 39700, ...patch };
+  }
+
+  it('行が無い日は close/open/high/low の全列を更新対象にする', () => {
+    const plan = planYahooUpdates(['2026-07-01'], new Map(), [bar('2026-07-01')]);
+    expect(plan.closeRows).toEqual([{ as_of_date: '2026-07-01', nikkei_close: 40000 }]);
+    expect(plan.openRows).toEqual([{ as_of_date: '2026-07-01', nikkei_open: 39800 }]);
+    expect(plan.highRows).toEqual([{ as_of_date: '2026-07-01', nikkei_high: 40100 }]);
+    expect(plan.lowRows).toEqual([{ as_of_date: '2026-07-01', nikkei_low: 39700 }]);
+    expect(plan.missing).toEqual([]);
+  });
+
+  it('NULL列のみ更新対象にする（既存 close は payload に含めない = OHLC後埋め）', () => {
+    const rowMap = new Map([
+      ['2026-07-01', rowWith('2026-07-01', { nikkei_close: 40000 })],
+    ]);
+    const plan = planYahooUpdates(['2026-07-01'], rowMap, [bar('2026-07-01')]);
+    expect(plan.closeRows).toEqual([]); // 既に終値あり → 触らない
+    expect(plan.openRows).toHaveLength(1);
+    expect(plan.highRows).toHaveLength(1);
+    expect(plan.lowRows).toHaveLength(1);
+  });
+
+  it('ソースの OHLC null穴は列単位でスキップ（既存値をnullで上書きしない）', () => {
+    const rowMap = new Map([
+      ['2026-07-01', rowWith('2026-07-01', { nikkei_high: 40100 })],
+    ]);
+    // ソースは open のみ null 穴、high はソースにあるが保存済み → open/high とも payload 無し
+    const plan = planYahooUpdates(['2026-07-01'], rowMap, [
+      bar('2026-07-01', { open: null }),
+    ]);
+    expect(plan.openRows).toEqual([]);
+    expect(plan.highRows).toEqual([]);
+    expect(plan.lowRows).toEqual([{ as_of_date: '2026-07-01', nikkei_low: 39700 }]);
+    expect(plan.closeRows).toHaveLength(1);
+    expect(rowMap.get('2026-07-01')!.nikkei_high).toBe(40100);
+  });
+
+  it('ソースに日付が無い日は missing としてカウント', () => {
+    const plan = planYahooUpdates(['2026-07-01', '2026-07-02'], new Map(), [bar('2026-07-02')]);
+    expect(plan.missing).toEqual(['2026-07-01']);
+    expect(plan.closeRows).toEqual([{ as_of_date: '2026-07-02', nikkei_close: 40000 }]);
   });
 });
 
