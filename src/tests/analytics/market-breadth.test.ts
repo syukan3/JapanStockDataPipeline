@@ -8,6 +8,10 @@ import {
   computeAdvDecRatio25,
   computeSma,
   includesPreviousYear,
+  isPctSma25Pending,
+  isPctSma200Pending,
+  PCT_SMA25_EXPECTED_FROM,
+  PCT_SMA200_EXPECTED_FROM,
   PRIME_MARKET_CODES,
   SMA_LONG_WINDOW,
   SMA_SHORT_WINDOW,
@@ -239,6 +243,34 @@ describe('BreadthAccumulator: breadth %（SMA上回り比率）', () => {
     const expectedSma = computeSma(adjustedCloses, SMA_SHORT_WINDOW);
     expect(expectedSma).toBe(112); // (100+...+124)/25
     expect(last!.pctAboveSma25).toBe(100); // 124 > 112
+  });
+});
+
+describe('isPctSma25Pending / isPctSma200Pending', () => {
+  it('境界日より前のnullはpending扱いしない（原理的に算出不能な恒久null）', () => {
+    const dayBefore25 = '2021-03-31'; // PCT_SMA25_EXPECTED_FROM = 2021-04-01 の前日
+    const dayBefore200 = '2021-11-30'; // PCT_SMA200_EXPECTED_FROM = 2021-12-01 の前日
+    expect(isPctSma25Pending(dayBefore25, null)).toBe(false);
+    expect(isPctSma200Pending(dayBefore200, null)).toBe(false);
+  });
+
+  it('境界日ちょうど・境界日以降のnullはpending扱いする', () => {
+    expect(isPctSma25Pending(PCT_SMA25_EXPECTED_FROM, null)).toBe(true);
+    expect(isPctSma25Pending('2026-07-01', null)).toBe(true);
+    expect(isPctSma200Pending(PCT_SMA200_EXPECTED_FROM, null)).toBe(true);
+    expect(isPctSma200Pending('2026-07-01', null)).toBe(true);
+  });
+
+  it('非nullの値があればpending扱いしない（境界の前後を問わない）', () => {
+    expect(isPctSma25Pending('2021-03-31', 50)).toBe(false);
+    expect(isPctSma25Pending('2026-07-01', 62.3)).toBe(false);
+    expect(isPctSma200Pending('2021-11-30', 50)).toBe(false);
+    expect(isPctSma200Pending('2026-07-01', 58.1)).toBe(false);
+  });
+
+  it('undefinedもnull同様に扱う（select結果に列が無い場合の防御）', () => {
+    expect(isPctSma25Pending('2026-07-01', undefined)).toBe(true);
+    expect(isPctSma200Pending('2026-07-01', undefined)).toBe(true);
   });
 });
 

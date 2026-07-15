@@ -31,6 +31,8 @@ import { getJSTDate, getJSTDateTime } from '../../src/lib/utils/date';
 import {
   BreadthAccumulator,
   includesPreviousYear,
+  isPctSma25Pending,
+  isPctSma200Pending,
   PRIME_MARKET_CODES,
   SMA_LONG_WARMUP_CALENDAR_DAYS,
   type BreadthBar,
@@ -215,16 +217,18 @@ async function fillBreadth(
 ): Promise<Record<string, unknown>> {
   const pending = businessDays.filter((d) => {
     const r = rowMap.get(d);
+    if (!r) return true;
     return (
-      !r ||
       r.advancers == null ||
       r.decliners == null ||
       r.unchanged == null ||
       r.new_highs == null ||
       r.new_lows == null ||
       r.prime_turnover_value == null ||
-      r.pct_above_sma25 == null ||
-      r.pct_above_sma200 == null
+      // 境界日より前は「原理的に算出不能な恒久null」でありpending扱いしない
+      // （さもないと埋まらない行を毎日再スキャンし続けてしまう）
+      isPctSma25Pending(d, r.pct_above_sma25) ||
+      isPctSma200Pending(d, r.pct_above_sma200)
     );
   });
   if (pending.length === 0) {

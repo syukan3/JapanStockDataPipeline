@@ -61,6 +61,33 @@ export const SMA_LONG_WINDOW = 200;
  */
 export const SMA_LONG_WARMUP_CALENDAR_DAYS = 340;
 
+/**
+ * pct_above_sma25/200 が「原理的に算出可能になる」開始日の目安。
+ * breadth系のバックフィル元（Scouter backtest.sqlite）は 2021-02-08 収録開始のため、
+ * そこから window 営業日分（+マージン）が経過するまでは、ユニバース全銘柄が
+ * window件の終値を持たず「全銘柄不足日はnull」（本ファイル冒頭のbreadth %節参照）が
+ * 恒久的に成立する。この期間のnullは「未計算」ではなく「期待される恒久null」であり、
+ * cron/seed の pending・missing 判定に含めてはならない（含めると原理的に埋まらない
+ * 行を毎回pending扱いし続け、feedStartの逆算で全期間再スキャンが恒久化する）。
+ * 値は 2021-02-08 + window営業日 を暦換算（約1.45倍）した上で安全側に切り上げた月初。
+ */
+export const PCT_SMA25_EXPECTED_FROM = '2021-04-01';
+export const PCT_SMA200_EXPECTED_FROM = '2021-12-01';
+
+/**
+ * pct_above_sma25 が null の日を pending/missing（再計算対象）として扱うべきか。
+ * 境界日（PCT_SMA25_EXPECTED_FROM）より前の null は「期待される恒久null」であり
+ * false を返す（= pending扱いしない）。cron の fillBreadth と seed の missing判定で共用。
+ */
+export function isPctSma25Pending(date: string, pctAboveSma25: number | null | undefined): boolean {
+  return date >= PCT_SMA25_EXPECTED_FROM && pctAboveSma25 == null;
+}
+
+/** pct_above_sma200 版。判定基準は isPctSma25Pending と同様（境界日は PCT_SMA200_EXPECTED_FROM）。 */
+export function isPctSma200Pending(date: string, pctAboveSma200: number | null | undefined): boolean {
+  return date >= PCT_SMA200_EXPECTED_FROM && pctAboveSma200 == null;
+}
+
 /** 銘柄ごとの高値/安値状態（当年・前年の2バケット）＋SMA用の終値リングバッファ */
 interface CodeState {
   prevClose: number | null;

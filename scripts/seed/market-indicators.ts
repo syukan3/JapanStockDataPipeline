@@ -37,6 +37,8 @@ import {
   BreadthAccumulator,
   computeAdvDecRatio25,
   includesPreviousYear,
+  isPctSma25Pending,
+  isPctSma200Pending,
   PRIME_MARKET_CODES,
   SMA_LONG_WARMUP_CALENDAR_DAYS,
   type BreadthBar,
@@ -128,8 +130,8 @@ async function main(): Promise<void> {
     const upserts = breadthRows
       .filter((r) => {
         const existing = rowMap.get(r.as_of_date);
+        if (!existing) return true;
         return (
-          !existing ||
           existing.advancers == null ||
           existing.decliners == null ||
           existing.unchanged == null ||
@@ -137,8 +139,10 @@ async function main(): Promise<void> {
           existing.new_lows == null ||
           existing.prime_turnover_value == null ||
           existing.adv_dec_ratio_25d == null ||
-          existing.pct_above_sma25 == null ||
-          existing.pct_above_sma200 == null
+          // 境界日より前は「原理的に算出不能な恒久null」でありmissing扱いしない
+          // （cron側 fillBreadth と同じ境界・同じ判定関数）
+          isPctSma25Pending(r.as_of_date, existing.pct_above_sma25) ||
+          isPctSma200Pending(r.as_of_date, existing.pct_above_sma200)
         );
       })
       .map((r) => ({ ...r, updated_at: new Date().toISOString() }));
