@@ -1,7 +1,7 @@
 /**
  * FRED 取得対象系列の定義
  *
- * @description 14系列の FRED series_id とメタ情報
+ * @description 15系列の FRED series_id とメタ情報
  */
 
 export interface FredSeriesConfig {
@@ -20,7 +20,7 @@ export interface FredSeriesConfig {
 }
 
 /**
- * FRED 14系列の定義
+ * FRED 15系列の定義
  */
 export const FRED_SERIES: readonly FredSeriesConfig[] = [
   // 景気
@@ -38,6 +38,7 @@ export const FRED_SERIES: readonly FredSeriesConfig[] = [
   { seriesId: 'BAMLC0A4CBBB',     category: 'credit',         region: 'us',      frequency: 'daily',   nameEn: 'IG BBB OAS Spread',               nameJa: 'IGスプレッド（BBB OAS）' },
   // 市場
   { seriesId: 'VIXCLS',            category: 'market',         region: 'us',      frequency: 'daily',   nameEn: 'CBOE VIX',                        nameJa: 'VIX' },
+  { seriesId: 'SP500',             category: 'market',         region: 'us',      frequency: 'daily',   nameEn: 'S&P 500 Index',                   nameJa: 'S&P500種指数' },
   // 金利
   { seriesId: 'T10Y2Y',            category: 'interest_rate',  region: 'us',      frequency: 'daily',   nameEn: '10Y-2Y Treasury Spread',          nameJa: '10Y-2Yスプレッド' },
   { seriesId: 'DGS10',             category: 'interest_rate',  region: 'us',      frequency: 'daily',   nameEn: '10-Year Treasury Yield',          nameJa: '米10年債利回り' },
