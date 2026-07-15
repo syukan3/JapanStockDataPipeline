@@ -6,7 +6,7 @@
  * analytics.market_indicators へ SERIES_START(2021-07-01) 以降の履歴を投入する。
  *
  * データソース:
- * - breadth系（騰落数/騰落レシオ/新高値新安値/売買代金）:
+ * - breadth系（騰落数/騰落レシオ/新高値新安値/売買代金/SMA上回り比率pct_above_sma25・200）:
  *   本番DBの equity_bar_daily は 2025-01-27 以降しか無いため、
  *   Scouter リポジトリの backtest.sqlite（2021-02-08〜、adj系・turnover_value・
  *   月次時点ユニバース equity_master 保持）から計算する。
@@ -32,11 +32,13 @@
 
 import { resolve } from 'path';
 import { loadEnv, startTimer } from './_shared';
+import { addDays } from '../../src/lib/utils/date';
 import {
   BreadthAccumulator,
   computeAdvDecRatio25,
   includesPreviousYear,
   PRIME_MARKET_CODES,
+  SMA_LONG_WARMUP_CALENDAR_DAYS,
   type BreadthBar,
 } from '../../src/lib/analytics/market-breadth';
 
@@ -134,7 +136,9 @@ async function main(): Promise<void> {
           existing.new_highs == null ||
           existing.new_lows == null ||
           existing.prime_turnover_value == null ||
-          existing.adv_dec_ratio_25d == null
+          existing.adv_dec_ratio_25d == null ||
+          existing.pct_above_sma25 == null ||
+          existing.pct_above_sma200 == null
         );
       })
       .map((r) => ({ ...r, updated_at: new Date().toISOString() }));
@@ -149,6 +153,8 @@ async function main(): Promise<void> {
       row.new_highs = r.new_highs;
       row.new_lows = r.new_lows;
       row.prime_turnover_value = r.prime_turnover_value;
+      row.pct_above_sma25 = r.pct_above_sma25;
+      row.pct_above_sma200 = r.pct_above_sma200;
     }
     summary.breadth = { computed: breadthRows.length, upserted };
     console.log(`breadth: upserted=${upserted}`);
@@ -202,6 +208,8 @@ interface BreadthSeedRow {
   new_highs: number;
   new_lows: number;
   prime_turnover_value: number;
+  pct_above_sma25: number | null;
+  pct_above_sma200: number | null;
 }
 
 /**
@@ -251,9 +259,14 @@ function computeBreadthFromSqlite(args: Args): BreadthSeedRow[] {
       .get() as { min: string | null; max: string | null };
     if (!range.min || !range.max) throw new Error('sqlite: equity_bar_daily is empty');
 
-    // 基準期間の先頭（from の年初/前年初）から流し込み（sqlite収録開始でクランプ）
+    // 基準期間の先頭（from の年初/前年初）から流し込み（sqlite収録開始でクランプ）。
+    // SMA200(200営業日)の暖機用に、baselineJan1だけでは足りない場合（4-12月起点）は
+    // 暦日ベースでも遡る（早い方を採用。範囲はsqlite収録開始でクランプ）。
     const baselineYear = Number(args.from.slice(0, 4)) - (includesPreviousYear(args.from) ? 1 : 0);
-    const feedStart = `${baselineYear}-01-01` < range.min ? range.min : `${baselineYear}-01-01`;
+    const baselineJan1 = `${baselineYear}-01-01`;
+    const smaWarmupStart = addDays(args.from, -SMA_LONG_WARMUP_CALENDAR_DAYS);
+    const desiredStart = smaWarmupStart < baselineJan1 ? smaWarmupStart : baselineJan1;
+    const feedStart = desiredStart < range.min ? range.min : desiredStart;
     const feedEnd = args.to < range.max ? args.to : range.max;
     console.log(`sqlite feed: ${feedStart} -> ${feedEnd} (coverage ${range.min}..${range.max})`);
 
@@ -272,13 +285,16 @@ function computeBreadthFromSqlite(args: Args): BreadthSeedRow[] {
     const flushDay = (): void => {
       if (!currentDate || haltedAt) return;
       const date = currentDate;
+      const isOutputDay = date >= args.from && date <= args.to;
       const primeSet = primeSetFor(date);
       if (!primeSet) return;
       const day = acc.addDay(date, currentBars, primeSet);
       fedDays++;
-      // カバレッジ不足日以降は出力を停止する（不完全な前日状態で計算した後続日を
-      // 固定化しない。cron 側 refresh-market-indicators.ts の halt 方針と同じ）
-      if (day.primeBarCount < Math.floor(primeSet.size * MIN_COVERAGE)) {
+      // 出力対象日（args.from..args.to）のみカバレッジ不足で停止する（不完全な前日状態で
+      // 計算した後続日を固定化しない。cron 側 refresh-market-indicators.ts の halt 方針と同じ）。
+      // 出力対象外（SMA200暖機専用の過去分）はカバレッジ不足でも継続する（暖機区間の
+      // 一時的な欠損1件で以降の全期間が失敗しないようにする）。
+      if (isOutputDay && day.primeBarCount < Math.floor(primeSet.size * MIN_COVERAGE)) {
         haltedAt = date;
         console.warn(
           `coverage below threshold, halt: ${date} (${day.primeBarCount}/${primeSet.size})`
@@ -294,7 +310,7 @@ function computeBreadthFromSqlite(args: Args): BreadthSeedRow[] {
           rollDec.shift();
         }
       }
-      if (date < args.from || date > args.to) return;
+      if (!isOutputDay) return;
       out.push({
         as_of_date: date,
         advancers: day.advancers,
@@ -305,6 +321,8 @@ function computeBreadthFromSqlite(args: Args): BreadthSeedRow[] {
         new_highs: day.newHighs,
         new_lows: day.newLows,
         prime_turnover_value: Math.round(day.turnoverValue),
+        pct_above_sma25: day.pctAboveSma25,
+        pct_above_sma200: day.pctAboveSma200,
       });
     };
 

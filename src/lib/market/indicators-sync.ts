@@ -39,6 +39,8 @@ export interface IndicatorRow {
   new_highs: number | null;
   new_lows: number | null;
   prime_turnover_value: number | null;
+  pct_above_sma25: number | null;
+  pct_above_sma200: number | null;
   nikkei_eps: number | null;
   topix_close: number | null;
   nt_ratio: number | null;
@@ -69,6 +71,8 @@ export function normalizeRow(r: IndicatorRow): IndicatorRow {
     new_highs: toNum(r.new_highs),
     new_lows: toNum(r.new_lows),
     prime_turnover_value: toNum(r.prime_turnover_value),
+    pct_above_sma25: toNum(r.pct_above_sma25),
+    pct_above_sma200: toNum(r.pct_above_sma200),
     nikkei_eps: toNum(r.nikkei_eps),
     topix_close: toNum(r.topix_close),
     nt_ratio: toNum(r.nt_ratio),
@@ -89,6 +93,8 @@ export function emptyRow(date: string): IndicatorRow {
     new_highs: null,
     new_lows: null,
     prime_turnover_value: null,
+    pct_above_sma25: null,
+    pct_above_sma200: null,
     nikkei_eps: null,
     topix_close: null,
     nt_ratio: null,

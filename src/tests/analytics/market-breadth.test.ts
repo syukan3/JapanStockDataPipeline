@@ -6,8 +6,11 @@ import { describe, it, expect } from 'vitest';
 import {
   BreadthAccumulator,
   computeAdvDecRatio25,
+  computeSma,
   includesPreviousYear,
   PRIME_MARKET_CODES,
+  SMA_LONG_WINDOW,
+  SMA_SHORT_WINDOW,
   type BreadthBar,
 } from '@/lib/analytics/market-breadth';
 
@@ -19,6 +22,13 @@ function bar(code: string, close: number, high?: number, low?: number, turnover 
     adjLow: low ?? close,
     turnoverValue: turnover,
   };
+}
+
+/** 2026年始からdayIndex日後の日付（年をまたがない範囲でのみ使う） */
+function seqDate(dayIndex: number): string {
+  const d = new Date(Date.UTC(2026, 0, 1));
+  d.setUTCDate(d.getUTCDate() + dayIndex);
+  return d.toISOString().slice(0, 10);
 }
 
 describe('includesPreviousYear', () => {
@@ -131,6 +141,104 @@ describe('BreadthAccumulator', () => {
     const d = acc.addDay('2026-05-02', [{ code: 'A', adjClose: null, adjHigh: null, adjLow: null, turnoverValue: null }], prime);
     expect(d.advancers + d.decliners + d.unchanged).toBe(0);
     expect(d.newHighs).toBe(0);
+  });
+});
+
+describe('computeSma', () => {
+  it('件数がwindow未満はnull（分母除外）', () => {
+    expect(computeSma([1, 2, 3], 5)).toBeNull();
+    expect(computeSma(Array(24).fill(100), 25)).toBeNull();
+    expect(computeSma([], 25)).toBeNull();
+  });
+
+  it('件数がちょうどwindowなら平均を返す', () => {
+    expect(computeSma([10, 20, 30], 3)).toBe(20);
+    expect(computeSma(Array(25).fill(100), 25)).toBe(100);
+  });
+
+  it('windowを超える配列は直近window件のみで平均する（古い値は無視）', () => {
+    expect(computeSma([10000, 10, 20, 30], 3)).toBe(20);
+  });
+});
+
+describe('BreadthAccumulator: breadth %（SMA上回り比率）', () => {
+  const primeA = new Set(['A']);
+
+  it('SMA25境界: 24件はnull、25件目から算出（当日終値を含む）', () => {
+    const acc = new BreadthAccumulator();
+    let last: ReturnType<BreadthAccumulator['addDay']> | undefined;
+    for (let i = 0; i < SMA_SHORT_WINDOW - 1; i++) {
+      last = acc.addDay(seqDate(i), [bar('A', 100)], primeA);
+    }
+    expect(last!.pctAboveSma25).toBeNull(); // 24件: 分母0
+
+    // 25件目: SMA25=(24*100+110)/25=100.4、close110は上回る
+    const d25 = acc.addDay(seqDate(SMA_SHORT_WINDOW - 1), [bar('A', 110)], primeA);
+    expect(d25.pctAboveSma25).toBe(100);
+  });
+
+  it('SMA200境界: 199件はnull、200件目から算出', () => {
+    const acc = new BreadthAccumulator();
+    let last: ReturnType<BreadthAccumulator['addDay']> | undefined;
+    for (let i = 0; i < SMA_LONG_WINDOW - 1; i++) {
+      last = acc.addDay(seqDate(i), [bar('A', 100)], primeA);
+    }
+    expect(last!.pctAboveSma200).toBeNull(); // 199件: 分母0
+
+    // 200件目: SMA200=(199*100+90)/200=99.95、close90は下回る
+    const d200 = acc.addDay(seqDate(SMA_LONG_WINDOW - 1), [bar('A', 90)], primeA);
+    expect(d200.pctAboveSma200).toBe(0);
+  });
+
+  it('ユニバース内で全銘柄が分母不足の日はnull（0%ではない）', () => {
+    const acc = new BreadthAccumulator();
+    const d1 = acc.addDay('2026-05-01', [bar('A', 100), bar('B', 200)], new Set(['A', 'B']));
+    expect(d1.pctAboveSma25).toBeNull();
+    expect(d1.pctAboveSma200).toBeNull();
+  });
+
+  it('上場直後銘柄（履歴不足）は分母除外され、既存銘柄のみで比率が決まる', () => {
+    const acc = new BreadthAccumulator();
+    for (let i = 0; i < SMA_SHORT_WINDOW - 1; i++) {
+      acc.addDay(seqDate(i), [bar('A', 100)], primeA); // A は25日分の履歴を積む
+    }
+    // 25日目にNEWが上場（履歴1件のみ）。NEWは分母除外され、Aのみで比率が決まる
+    const d = acc.addDay(
+      seqDate(SMA_SHORT_WINDOW - 1),
+      [bar('A', 110), bar('NEW', 500)],
+      new Set(['A', 'NEW'])
+    );
+    expect(d.pctAboveSma25).toBe(100); // NEWが分母に入れば50%になるはずだが除外され100%
+  });
+
+  it('プライム外の銘柄も終値状態(closes)は維持され、プライム入り後すぐにSMAへ反映される', () => {
+    const acc = new BreadthAccumulator();
+    // X はプライム外だが24日分の終値が状態として積まれる
+    for (let i = 0; i < SMA_SHORT_WINDOW - 1; i++) {
+      acc.addDay(seqDate(i), [bar('A', 100), bar('X', 100)], primeA);
+    }
+    // 25日目にXがプライム入り。過去の終値履歴があるため直後からSMA25が算出できる
+    const d = acc.addDay(
+      seqDate(SMA_SHORT_WINDOW - 1),
+      [bar('A', 100), bar('X', 130)],
+      new Set(['A', 'X'])
+    );
+    // A: SMA25=100（全て100）→ close100は上回らない。X: SMA25=101.2→ close130は上回る
+    expect(d.pctAboveSma25).toBe(50); // 2銘柄中1銘柄(X)のみ上回る
+  });
+
+  it('分割調整: 調整後終値の連続系列であれば分割日の見せかけの急落・急騰は起きない', () => {
+    const acc = new BreadthAccumulator();
+    // パイプライン側で既に分割調整済みの調整後終値を渡す前提（生値なら分割日に半値等に
+    // ジャンプするところ、調整後終値は緩やかに連続する）
+    const adjustedCloses = Array.from({ length: SMA_SHORT_WINDOW }, (_, i) => 100 + i); // 100..124
+    let last: ReturnType<BreadthAccumulator['addDay']> | undefined;
+    adjustedCloses.forEach((close, i) => {
+      last = acc.addDay(seqDate(i), [bar('A', close)], primeA);
+    });
+    const expectedSma = computeSma(adjustedCloses, SMA_SHORT_WINDOW);
+    expect(expectedSma).toBe(112); // (100+...+124)/25
+    expect(last!.pctAboveSma25).toBe(100); // 124 > 112
   });
 });
 

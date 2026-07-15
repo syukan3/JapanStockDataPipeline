@@ -9,6 +9,7 @@
  * ソースグループ（担当カラムのみを同一shapeでupsertし、他グループの列は触らない）:
  *   1. breadth: equity_bar_daily(session='DAY') から自前計算
  *      → advancers/decliners/unchanged/new_highs/new_lows/prime_turnover_value
+ *      → pct_above_sma25/pct_above_sma200（SMA上回り比率。調整後終値ベース）
  *      → adv_dec_ratio_25d は保存済みの騰落数25日窓から導出
  *   2. yahoo:   nikkei_close（^N225 終値）
  *   3. daily2:  nikkei_per / short_selling_ratio（nikkei225jp.com。終値をYahoo保存値と突合）
@@ -31,6 +32,7 @@ import {
   BreadthAccumulator,
   includesPreviousYear,
   PRIME_MARKET_CODES,
+  SMA_LONG_WARMUP_CALENDAR_DAYS,
   type BreadthBar,
 } from '../../src/lib/analytics/market-breadth';
 import {
@@ -220,7 +222,9 @@ async function fillBreadth(
       r.unchanged == null ||
       r.new_highs == null ||
       r.new_lows == null ||
-      r.prime_turnover_value == null
+      r.prime_turnover_value == null ||
+      r.pct_above_sma25 == null ||
+      r.pct_above_sma200 == null
     );
   });
   if (pending.length === 0) {
@@ -240,7 +244,14 @@ async function fillBreadth(
   // 不完全な基準期間となる（そのケースの履歴は seed スクリプトが担当）。
   const oldest = pending[0];
   const baselineYear = Number(oldest.slice(0, 4)) - (includesPreviousYear(oldest) ? 1 : 0);
-  const feedStart = `${baselineYear}-01-01`;
+  const baselineJan1 = `${baselineYear}-01-01`;
+  // SMA200(200営業日)の暖機用に、新高値/新安値の基準期間（baselineJan1）だけでは
+  // 4〜12月起点のpendingで200営業日に届かないため、暦日ベースでも遡る（早い方を採用）。
+  // pct_above_sma200 は equity_bar_daily の収録開始(2025-01-27)から200営業日に満たない
+  // 期間は分母0=nullが正しい結果であり続ける（自己修復ループにはならない: 収録開始から
+  // 十分な日数が経過した現在の運用では常に暖機済みで解消する）。
+  const smaWarmupStart = addDays(oldest, -SMA_LONG_WARMUP_CALENDAR_DAYS);
+  const feedStart = smaWarmupStart < baselineJan1 ? smaWarmupStart : baselineJan1;
   const feedEnd = pending[pending.length - 1];
   const feedDays = await listBusinessDays(core, feedStart, feedEnd);
   logger.info('Feeding bars', { feedStart, feedEnd, feedDays: feedDays.length });
@@ -251,17 +262,31 @@ async function fillBreadth(
   let haltedAt: string | null = null;
 
   for (const date of feedDays) {
+    const isOutputDay = pendingSet.has(date);
     const bars = await fetchBarsForDate(core, date);
-    if (bars.length === 0 && date < DB_BARS_START) continue; // DB収録前の暦日（seed担当領域）
-    const day = bars.length > 0 ? acc.addDay(date, bars, primeSet) : null;
-    // 未同期(0件)・カバレッジ不足の営業日を検出したら、その日以降の出力を停止する。
+    if (bars.length === 0) {
+      if (date < DB_BARS_START) continue; // DB収録前の暦日（seed担当領域、恒久的に空）
+      // バー欠損日。出力対象日なら未同期とみなし停止（次回実行で自己修復）。
+      // 出力対象外（SMA200暖機専用の過去分）は状態を進めず読み飛ばす。SMA200暖機の
+      // 遡り幅（最大340暦日）は equity_bar_daily の過去の同期欠損を踏みうるため、
+      // ここで停止すると恒久的に breadth 全体が算出不能になってしまう。
+      if (isOutputDay) {
+        haltedAt = date;
+        break;
+      }
+      continue;
+    }
+    const day = acc.addDay(date, bars, primeSet);
+    // 出力対象日のみカバレッジ不足を検出したら以降の出力を停止する。
     // 不完全な前日状態で計算した後続日を非NULLで固定化しない（当該日修復後の次回実行で
-    // フィード全体を再構築して自己修復する）。
-    if (day == null || day.primeBarCount < minCoverage) {
+    // フィード全体を再構築して自己修復する）。暖機専用の過去分はカバレッジ不足でも
+    // 継続する（コード単位の終値リングバッファは欠損分が単に更新されないだけで、
+    // カバレッジ回復後に自然と追いつく）。
+    if (isOutputDay && day.primeBarCount < minCoverage) {
       haltedAt = date;
       break;
     }
-    if (!pendingSet.has(date)) continue;
+    if (!isOutputDay) continue;
     upserts.push({
       as_of_date: date,
       advancers: day.advancers,
@@ -270,6 +295,8 @@ async function fillBreadth(
       new_highs: day.newHighs,
       new_lows: day.newLows,
       prime_turnover_value: Math.round(day.turnoverValue),
+      pct_above_sma25: day.pctAboveSma25,
+      pct_above_sma200: day.pctAboveSma200,
       updated_at: new Date().toISOString(),
     });
   }
@@ -289,6 +316,8 @@ async function fillBreadth(
     row.new_highs = u.new_highs as number;
     row.new_lows = u.new_lows as number;
     row.prime_turnover_value = u.prime_turnover_value as number;
+    row.pct_above_sma25 = u.pct_above_sma25 as number | null;
+    row.pct_above_sma200 = u.pct_above_sma200 as number | null;
   }
   // 今回埋め直した日付を窓に含む後続日は既存 ratio があっても再計算する（欠損修復の伝播）
   const newlyFilled = new Set(upserts.map((u) => u.as_of_date));
