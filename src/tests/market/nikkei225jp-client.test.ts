@@ -95,6 +95,8 @@ describe('parseNikkei225jpDaily', () => {
     expect(r.nikkeiClose).toBe(69737.69);
     expect(r.per).toBe(18.58);
     expect(r.nikkeiVi).toBe(37.36);
+    expect(r.shortSellingRestricted).toBe(27.1); // col[22]
+    expect(r.shortSellingUnrestricted).toBe(9.2); // col[24]
     expect(r.refAdvDecRatio).toBe(116.37);
     expect(r.refNewHighs).toBe(106);
     expect(r.refNewLows).toBe(3);
@@ -121,6 +123,22 @@ describe('parseNikkei225jpDaily', () => {
     // 100超・8未満は範囲外としてnull化
     expect(parseNikkei225jpDaily(daily2Payload([daily2Row({ 11: 120 })]))[0].nikkeiVi).toBeNull();
     expect(parseNikkei225jpDaily(daily2Payload([daily2Row({ 11: 5 })]))[0].nikkeiVi).toBeNull();
+  });
+
+  it('空売り比率2成分(col22/col24)をパースし、値域外は各列のみnull化', () => {
+    // 2024-08-05 実測相当（規制あり28.0 / 規制なし10.5）は許容
+    const r = parseNikkei225jpDaily(daily2Payload([daily2Row({ 22: 28.0, 24: 10.5 })]))[0];
+    expect(r.shortSellingRestricted).toBe(28.0);
+    expect(r.shortSellingUnrestricted).toBe(10.5);
+    // 値域外（restricted>55 / unrestricted>25）はその列のみnull・他列は保持
+    const bad = parseNikkei225jpDaily(daily2Payload([daily2Row({ 22: 60, 24: 30 })]))[0];
+    expect(bad.shortSellingRestricted).toBeNull();
+    expect(bad.shortSellingUnrestricted).toBeNull();
+    expect(bad.nikkeiVi).toBe(37.36); // 他列は無傷
+    // 空文字列は null
+    const empty = parseNikkei225jpDaily(daily2Payload([daily2Row({ 22: '', 24: '' })]))[0];
+    expect(empty.shortSellingRestricted).toBeNull();
+    expect(empty.shortSellingUnrestricted).toBeNull();
   });
 
   it('空文字列の値は null として扱う', () => {

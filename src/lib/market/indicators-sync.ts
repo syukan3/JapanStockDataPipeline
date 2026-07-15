@@ -31,6 +31,8 @@ export interface IndicatorRow {
   nikkei_close: number | null;
   nikkei_per: number | null;
   nikkei_vi: number | null;
+  short_selling_ratio_restricted: number | null;
+  short_selling_ratio_unrestricted: number | null;
   margin_pl_ratio: number | null;
   advancers: number | null;
   decliners: number | null;
@@ -61,6 +63,8 @@ export function normalizeRow(r: IndicatorRow): IndicatorRow {
     nikkei_close: toNum(r.nikkei_close),
     nikkei_per: toNum(r.nikkei_per),
     nikkei_vi: toNum(r.nikkei_vi),
+    short_selling_ratio_restricted: toNum(r.short_selling_ratio_restricted),
+    short_selling_ratio_unrestricted: toNum(r.short_selling_ratio_unrestricted),
     margin_pl_ratio: toNum(r.margin_pl_ratio),
     advancers: toNum(r.advancers),
     decliners: toNum(r.decliners),
@@ -81,6 +85,8 @@ export function emptyRow(date: string): IndicatorRow {
     nikkei_close: null,
     nikkei_per: null,
     nikkei_vi: null,
+    short_selling_ratio_restricted: null,
+    short_selling_ratio_unrestricted: null,
     margin_pl_ratio: null,
     advancers: null,
     decliners: null,
@@ -190,7 +196,14 @@ export async function fillDaily2(
 ): Promise<Record<string, unknown>> {
   const pending = businessDays.filter((d) => {
     const r = rowMap.get(d);
-    return !r || r.nikkei_per == null || r.nikkei_vi == null || r.nikkei_close == null;
+    return (
+      !r ||
+      r.nikkei_per == null ||
+      r.nikkei_vi == null ||
+      r.short_selling_ratio_restricted == null ||
+      r.short_selling_ratio_unrestricted == null ||
+      r.nikkei_close == null
+    );
   });
   if (pending.length === 0) return { pending: 0, upserted: 0 };
   const rows = prefetched ?? (await fetchNikkei225jpDaily());
@@ -204,6 +217,24 @@ export async function fillDaily2(
   upserted += await upsertRows(analytics, plan.viRows.map((r) => ({ ...r, ...stamp })), dryRun);
   for (const u of plan.viRows) {
     getOrCreate(rowMap, u.as_of_date).nikkei_vi = u.nikkei_vi;
+  }
+  upserted += await upsertRows(
+    analytics,
+    plan.ssRestrictedRows.map((r) => ({ ...r, ...stamp })),
+    dryRun
+  );
+  for (const u of plan.ssRestrictedRows) {
+    getOrCreate(rowMap, u.as_of_date).short_selling_ratio_restricted =
+      u.short_selling_ratio_restricted;
+  }
+  upserted += await upsertRows(
+    analytics,
+    plan.ssUnrestrictedRows.map((r) => ({ ...r, ...stamp })),
+    dryRun
+  );
+  for (const u of plan.ssUnrestrictedRows) {
+    getOrCreate(rowMap, u.as_of_date).short_selling_ratio_unrestricted =
+      u.short_selling_ratio_unrestricted;
   }
   upserted += await upsertRows(analytics, plan.closeRows.map((r) => ({ ...r, ...stamp })), dryRun);
   for (const u of plan.closeRows) getOrCreate(rowMap, u.as_of_date).nikkei_close = u.nikkei_close;
@@ -231,10 +262,14 @@ export function planDaily2Updates(
     nikkeiClose: number | null;
     per: number | null;
     nikkeiVi: number | null;
+    shortSellingRestricted: number | null;
+    shortSellingUnrestricted: number | null;
   }>
 ): {
   perRows: Array<{ as_of_date: string; nikkei_per: number }>;
   viRows: Array<{ as_of_date: string; nikkei_vi: number }>;
+  ssRestrictedRows: Array<{ as_of_date: string; short_selling_ratio_restricted: number }>;
+  ssUnrestrictedRows: Array<{ as_of_date: string; short_selling_ratio_unrestricted: number }>;
   closeRows: Array<{ as_of_date: string; nikkei_close: number }>;
   noSource: number;
   closeMismatch: number;
@@ -242,6 +277,12 @@ export function planDaily2Updates(
   const srcMap = new Map(srcRows.map((r) => [r.date, r]));
   const perRows: Array<{ as_of_date: string; nikkei_per: number }> = [];
   const viRows: Array<{ as_of_date: string; nikkei_vi: number }> = [];
+  const ssRestrictedRows: Array<{ as_of_date: string; short_selling_ratio_restricted: number }> =
+    [];
+  const ssUnrestrictedRows: Array<{
+    as_of_date: string;
+    short_selling_ratio_unrestricted: number;
+  }> = [];
   const closeRows: Array<{ as_of_date: string; nikkei_close: number }> = [];
   let closeMismatch = 0;
   let noSource = 0;
@@ -278,11 +319,39 @@ export function planDaily2Updates(
       viRows.push({ as_of_date: date, nikkei_vi: src.nikkeiVi });
       updatedAny = true;
     }
-    if (!updatedAny && (row.nikkei_per == null || row.nikkei_vi == null)) {
+    if (row.short_selling_ratio_restricted == null && src.shortSellingRestricted != null) {
+      ssRestrictedRows.push({
+        as_of_date: date,
+        short_selling_ratio_restricted: src.shortSellingRestricted,
+      });
+      updatedAny = true;
+    }
+    if (row.short_selling_ratio_unrestricted == null && src.shortSellingUnrestricted != null) {
+      ssUnrestrictedRows.push({
+        as_of_date: date,
+        short_selling_ratio_unrestricted: src.shortSellingUnrestricted,
+      });
+      updatedAny = true;
+    }
+    if (
+      !updatedAny &&
+      (row.nikkei_per == null ||
+        row.nikkei_vi == null ||
+        row.short_selling_ratio_restricted == null ||
+        row.short_selling_ratio_unrestricted == null)
+    ) {
       noSource++;
     }
   }
-  return { perRows, viRows, closeRows, noSource, closeMismatch };
+  return {
+    perRows,
+    viRows,
+    ssRestrictedRows,
+    ssUnrestrictedRows,
+    closeRows,
+    noSource,
+    closeMismatch,
+  };
 }
 
 // ============================================================

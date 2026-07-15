@@ -27,8 +27,25 @@ function rowWith(date: string, patch: Partial<IndicatorRow>): IndicatorRow {
   return { ...emptyRow(date), ...patch };
 }
 
-function src(date: string, patch: Partial<{ nikkeiClose: number | null; per: number | null; nikkeiVi: number | null }> = {}) {
-  return { date, nikkeiClose: 40000, per: 18.0, nikkeiVi: 22.5, ...patch };
+function src(
+  date: string,
+  patch: Partial<{
+    nikkeiClose: number | null;
+    per: number | null;
+    nikkeiVi: number | null;
+    shortSellingRestricted: number | null;
+    shortSellingUnrestricted: number | null;
+  }> = {}
+) {
+  return {
+    date,
+    nikkeiClose: 40000,
+    per: 18.0,
+    nikkeiVi: 22.5,
+    shortSellingRestricted: 30.0,
+    shortSellingUnrestricted: 9.0,
+    ...patch,
+  };
 }
 
 describe('planDaily2Updates', () => {
@@ -41,6 +58,24 @@ describe('planDaily2Updates', () => {
     expect(plan.viRows).toEqual([
       { as_of_date: '2026-07-01', nikkei_vi: 22.5 },
     ]);
+    expect(plan.ssRestrictedRows).toEqual([
+      { as_of_date: '2026-07-01', short_selling_ratio_restricted: 30.0 },
+    ]);
+    expect(plan.ssUnrestrictedRows).toEqual([
+      { as_of_date: '2026-07-01', short_selling_ratio_unrestricted: 9.0 },
+    ]);
+  });
+
+  it('空売り比率成分は片方だけ値域外null化されても他方は更新する', () => {
+    const rowMap = new Map<string, IndicatorRow>();
+    // 規制なし成分がソース側でnull（値域外null化を模擬）→ 規制あり側だけ更新
+    const plan = planDaily2Updates(
+      ['2026-07-01'],
+      rowMap,
+      [src('2026-07-01', { shortSellingUnrestricted: null })]
+    );
+    expect(plan.ssRestrictedRows).toHaveLength(1);
+    expect(plan.ssUnrestrictedRows).toEqual([]);
   });
 
   it('ソース側がnullの列は更新しない（既存値をnullで上書きしない）', () => {
@@ -64,6 +99,8 @@ describe('planDaily2Updates', () => {
     expect(plan.closeMismatch).toBe(1);
     expect(plan.perRows).toEqual([]);
     expect(plan.viRows).toEqual([]);
+    expect(plan.ssRestrictedRows).toEqual([]);
+    expect(plan.ssUnrestrictedRows).toEqual([]);
   });
 
   it('Yahoo欠損日はdaily2終値でフォールバック', () => {
@@ -72,6 +109,8 @@ describe('planDaily2Updates', () => {
     expect(plan.closeRows).toEqual([{ as_of_date: '2026-07-01', nikkei_close: 40000 }]);
     expect(plan.perRows).toHaveLength(1);
     expect(plan.viRows).toHaveLength(1);
+    expect(plan.ssRestrictedRows).toHaveLength(1);
+    expect(plan.ssUnrestrictedRows).toHaveLength(1);
   });
 
   it('ソースに日付が無い場合は noSource としてカウント', () => {
