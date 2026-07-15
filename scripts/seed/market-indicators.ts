@@ -11,7 +11,7 @@
  *   Scouter リポジトリの backtest.sqlite（2021-02-08〜、adj系・turnover_value・
  *   月次時点ユニバース equity_master 保持）から計算する。
  *   sqlite 収録最終日以降の端数は日次 refresh-market-indicators.ts が DB から埋める。
- * - external系（日経終値/PER/空売り比率/信用評価損益率）: Yahoo + nikkei225jp.com
+ * - external系（日経終値/PER/日経VI/空売り比率2成分/信用評価損益率）: Yahoo + nikkei225jp.com
  * - derived系（EPS/TOPIX/NT倍率）: 先に `npm run seed:topix -- --from 2021-07-01` で
  *   jquants_core.topix_bar_daily を5年化しておくこと（TOPIX欠損分は NT が NULL のまま残り、
  *   後から seed を再実行すれば埋まる）。
