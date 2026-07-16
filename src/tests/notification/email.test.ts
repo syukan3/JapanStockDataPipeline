@@ -21,6 +21,7 @@ import {
   sendJobSuccessEmail,
   sendConsecutiveFailureAlert,
   sendWorkflowFailureEmail,
+  sendCapacityReportEmail,
 } from '@/lib/notification/email';
 
 describe('notification/email.ts', () => {
@@ -225,6 +226,72 @@ describe('notification/email.ts', () => {
       delete process.env.RESEND_API_KEY;
 
       const result = await sendConsecutiveFailureAlert('cron_a', 3, ['Error']);
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('sendCapacityReportEmail', () => {
+    const report = {
+      subject: '[DB容量] 421MB / 500MB (84%)',
+      html: '<p>report</p>',
+    };
+
+    it('RESEND_API_KEY未設定の場合はfalseを返す', async () => {
+      delete process.env.RESEND_API_KEY;
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      const result = await sendCapacityReportEmail(report);
+
+      expect(result).toBe(false);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('ALERT_EMAIL_TO未設定の場合はfalseを返す', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      delete process.env.ALERT_EMAIL_TO;
+
+      const result = await sendCapacityReportEmail(report);
+
+      expect(result).toBe(false);
+    });
+
+    it('設定が揃っている場合は渡された件名・本文でメール送信する', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockResolvedValue({ data: { id: 'email-123' }, error: null });
+
+      const result = await sendCapacityReportEmail(report);
+
+      expect(result).toBe(true);
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: ['test@example.com'],
+          subject: report.subject,
+          html: report.html,
+        })
+      );
+    });
+
+    it('Resendエラーの場合はfalseを返す', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockResolvedValue({ data: null, error: { message: 'Rate limit exceeded' } });
+
+      const result = await sendCapacityReportEmail(report);
+
+      expect(result).toBe(false);
+    });
+
+    it('例外が発生してもfalseを返す（クラッシュしない）', async () => {
+      process.env.RESEND_API_KEY = 'test-key';
+      process.env.ALERT_EMAIL_TO = 'test@example.com';
+
+      mockSend.mockRejectedValue(new Error('Network error'));
+
+      const result = await sendCapacityReportEmail(report);
 
       expect(result).toBe(false);
     });

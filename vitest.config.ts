@@ -47,6 +47,7 @@ export default defineConfig({
         // notification
         'src/lib/notification/email.ts',
         'src/lib/notification/templates.ts',
+        'src/lib/notification/capacity-report.ts',
         // cron handlers
         'src/lib/cron/catch-up.ts',
         'src/lib/cron/handlers/cron-a.ts',
