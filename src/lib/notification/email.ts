@@ -10,6 +10,7 @@ import { createLogger } from '../utils/logger';
 import { escapeHtml } from '../utils/html';
 import { getJobFailureEmailTemplate, getJobSuccessEmailTemplate } from './templates';
 import type { JobName } from '../cron/job-run';
+import type { CapacityReport } from './capacity-report';
 
 const logger = createLogger({ module: 'email' });
 
@@ -217,6 +218,46 @@ export async function sendConsecutiveFailureAlert(
     return !result.error;
   } catch (error) {
     logger.error('Error sending consecutive failure alert', { jobName, error });
+    return false;
+  }
+}
+
+/**
+ * DB容量レポートメールを送信
+ *
+ * @description db-archival ジョブが毎回（週1回）送信する。件名・本文は
+ * `buildCapacityReport`（純関数）が組み立て済みのものをそのまま送るだけ。
+ * @param report buildCapacityReport の戻り値
+ * @returns 送信成功した場合 true
+ */
+export async function sendCapacityReportEmail(
+  report: Pick<CapacityReport, 'subject' | 'html'>
+): Promise<boolean> {
+  const resend = getResendClient();
+  const to = getAlertEmailTo();
+
+  if (!resend || !to) {
+    logger.info('Capacity report email skipped (not configured)');
+    return false;
+  }
+
+  try {
+    const result = await resend.emails.send({
+      from: getEmailFrom(),
+      to: [to],
+      subject: report.subject,
+      html: report.html,
+    });
+
+    if (result.error) {
+      logger.error('Failed to send capacity report email', { error: result.error });
+      return false;
+    }
+
+    logger.info('Capacity report email sent', { emailId: result.data?.id });
+    return true;
+  } catch (error) {
+    logger.error('Error sending capacity report email', { error });
     return false;
   }
 }

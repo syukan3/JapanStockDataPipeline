@@ -12,7 +12,12 @@
 import { gzipSync } from 'node:zlib';
 import { createAdminClient } from '../../src/lib/supabase/admin';
 import { createLogger } from '../../src/lib/utils/logger';
-import { sendJobFailureEmail, sendJobSuccessEmail } from '../../src/lib/notification/email';
+import { sendJobFailureEmail, sendJobSuccessEmail, sendCapacityReportEmail } from '../../src/lib/notification/email';
+import {
+  buildCapacityReport,
+  type CapacityTopTable,
+  type CapacityArchivalOutcome,
+} from '../../src/lib/notification/capacity-report';
 
 const JOB_NAME = 'db-archival' as const;
 const STORAGE_BUCKET = 'db-archives';
@@ -29,6 +34,9 @@ const DEFAULT_THRESHOLD_MB = 450;
 
 /** ページあたりの行数 */
 const PAGE_SIZE = 1000;
+
+/** 容量レポートに載せる上位テーブル数 */
+const TOP_TABLES_LIMIT = 5;
 
 const logger = createLogger({ module: 'archive-equity-bars' });
 
@@ -118,6 +126,72 @@ async function getDbSizeMb(): Promise<number> {
   );
   const sizeBytes = Number(result[0]?.size_bytes ?? 0);
   return sizeBytes / (1024 * 1024);
+}
+
+// ---------------------------------------------------------------------------
+// Capacity report
+// ---------------------------------------------------------------------------
+
+/** サイズ上位テーブルを取得（pg_total_relation_size = ヒープ+インデックス+TOAST合計） */
+async function getTopTables(limit: number): Promise<CapacityTopTable[]> {
+  const result = await executeSql(`
+    SELECT
+      schemaname AS schema_name,
+      relname AS table_name,
+      pg_total_relation_size(format('%I.%I', schemaname, relname)::regclass) AS total_size_bytes
+    FROM pg_stat_user_tables
+    ORDER BY total_size_bytes DESC
+    LIMIT ${limit}
+  `);
+
+  return result.map((row) => ({
+    schemaName: String(row.schema_name),
+    tableName: String(row.table_name),
+    totalSizeBytes: Number(row.total_size_bytes ?? 0),
+  }));
+}
+
+/** jquants_core.equity_bar_daily のデッドタプル数（未回収VACUUM分。ブロート監視用） */
+async function getEquityBarDeadTupleCount(): Promise<number> {
+  const result = await executeSql(`
+    SELECT n_dead_tup
+    FROM pg_stat_user_tables
+    WHERE schemaname = 'jquants_core' AND relname = '${TABLE}'
+  `);
+  return Number(result[0]?.n_dead_tup ?? 0);
+}
+
+/**
+ * 容量レポートを組み立てて送信する。
+ *
+ * @description 毎回のジョブ実行（週1回）で必ず呼ばれる。レポートの組み立て・送信に
+ * 失敗してもジョブ全体は失敗させない（warnログのみ、呼び出し元には伝播しない）。
+ */
+async function sendCapacityReport(
+  dbSizeMb: number,
+  archival: CapacityArchivalOutcome
+): Promise<void> {
+  try {
+    const [topTables, equityBarDeadTupleCount] = await Promise.all([
+      getTopTables(TOP_TABLES_LIMIT),
+      getEquityBarDeadTupleCount(),
+    ]);
+
+    const report = buildCapacityReport({
+      dbSizeMb,
+      topTables,
+      equityBarDeadTupleCount,
+      archival,
+      generatedAt: new Date(),
+    });
+
+    const sent = await sendCapacityReportEmail(report);
+    logger.info('Capacity report processed', { sent, subject: report.subject });
+  } catch (error) {
+    logger.warn('Failed to build/send capacity report (non-fatal)', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +335,10 @@ async function main(): Promise<void> {
 
   if (dbSizeMb < thresholdMb) {
     logger.info('No archival needed - DB size is below threshold');
+
+    // 容量レポートは閾値に関わらず毎回（週1回）送信する
+    await sendCapacityReport(dbSizeMb, { executed: false });
+
     console.log(JSON.stringify({
       success: true,
       action: 'skipped',
@@ -471,6 +549,15 @@ async function main(): Promise<void> {
         error: emailError instanceof Error ? emailError.message : String(emailError),
       });
     }
+
+    // 容量レポートは閾値に関わらず毎回（週1回）送信する。アーカイブ後の実サイズを使う
+    await sendCapacityReport(dbSizeAfter, {
+      executed: true,
+      archiveRange: result.archiveRange,
+      rowsArchived: totalRows,
+      savedMb: result.savedMb,
+      storagePath: result.storagePath,
+    });
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

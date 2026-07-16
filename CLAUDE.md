@@ -15,7 +15,7 @@
 | Cron E: 優待 + 信用残高 | 毎日 16:30 | `.github/workflows/cron-e.yml` → `scripts/cron/cron-e-direct.ts` |
 | テクニカル指標再計算 | Cron A 内 | `scripts/cron/refresh-technical.ts` |
 | 市場指標（日経PER/騰落レシオ等9種） | Cron A 内 | `scripts/cron/refresh-market-indicators.ts` |
-| DBアーカイブ（450MB超過時） | 日曜 03:00 | `.github/workflows/db-archival.yml` |
+| DBアーカイブ（450MB超過時）+ DB容量レポート（毎回・80%/90%で件名に警告） | 日曜 03:00 | `.github/workflows/db-archival.yml` → `scripts/archival/archive-equity-bars.ts` |
 | pg_cron 外部トリガー（GH Actions遅延対策） | — | マイグレ 00057/00058、監視 00060/00061（ops スキーマ） |
 
 ## ディレクトリ地図
