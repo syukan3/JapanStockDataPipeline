@@ -17,6 +17,7 @@ import { createLogger } from '../utils/logger';
 import { batchUpsert } from '../utils/batch';
 import { computeAdvDecRatio25 } from '../analytics/market-breadth';
 import { fetchNikkeiDailyBars, type DailyBar } from './yahoo-chart-client';
+import { fetchNikkeiOfficialDaily, NIKKEI_OFFICIAL_CSV_FROM } from './nikkei-official-client';
 import { fetchNikkei225jpDaily, fetchNikkei225jpWeekly } from './nikkei225jp-client';
 
 const logger = createLogger({ module: 'market-indicators-sync' });
@@ -171,29 +172,49 @@ export async function upsertRows(
 }
 
 // ============================================================
-// yahoo（日経平均OHLC。close と open/high/low は列単位で独立に埋める）
+// ohlc: 日経平均OHLC。一次ソース=日経公式CSV（2026-07にYahooが429恒常化したため切替）、
+// フォールバック=Yahoo chart API。close と open/high/low は列単位で独立に埋める。
 // ============================================================
+
+/**
+ * 日経OHLCのpending判定（純関数・テスト対象）。
+ * 公式CSVの収録開始（NIKKEI_OFFICIAL_CSV_FROM=2023-01-04）より前の日付では
+ * open/high/low の null は「取得手段のない恒久null」でありpending扱いしない
+ * （breadth % の PCT_SMA*_EXPECTED_FROM と同じ理由。含めると埋まらない行を
+ * 再スキャンし続ける）。close は全期間でpending対象。
+ */
+export function isOhlcPending(date: string, row: IndicatorRow | undefined): boolean {
+  if (!row || row.nikkei_close == null) return true;
+  if (date < NIKKEI_OFFICIAL_CSV_FROM) return false;
+  return row.nikkei_open == null || row.nikkei_high == null || row.nikkei_low == null;
+}
+
 export async function fillYahoo(
   analytics: Client,
   businessDays: string[],
   rowMap: Map<string, IndicatorRow>,
   dryRun: boolean
 ): Promise<Record<string, unknown>> {
-  const pending = businessDays.filter((d) => {
-    const r = rowMap.get(d);
-    return (
-      !r ||
-      r.nikkei_close == null ||
-      r.nikkei_open == null ||
-      r.nikkei_high == null ||
-      r.nikkei_low == null
-    );
-  });
+  const pending = businessDays.filter((d) => isOhlcPending(d, rowMap.get(d)));
   if (pending.length === 0) return { pending: 0, upserted: 0 };
-  const bars = await fetchNikkeiDailyBars(pending[0], pending[pending.length - 1]);
+  let source = 'official';
+  let bars: DailyBar[];
+  try {
+    const all = await fetchNikkeiOfficialDaily();
+    const first = pending[0];
+    const last = pending[pending.length - 1];
+    bars = all.filter((b) => b.date >= first && b.date <= last);
+  } catch (err) {
+    logger.warn('公式CSV取得失敗・Yahooへフォールバック', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    source = 'yahoo';
+    bars = await fetchNikkeiDailyBars(pending[0], pending[pending.length - 1]);
+  }
   const plan = planYahooUpdates(pending, rowMap, bars);
   if (plan.missing.length > 0) {
-    logger.warn('Yahoo: 一部日付が取得できず', {
+    logger.warn('OHLC: 一部日付が取得できず', {
+      source,
       count: plan.missing.length,
       sample: plan.missing.slice(0, 5),
     });
@@ -211,7 +232,7 @@ export async function fillYahoo(
   for (const u of plan.highRows) getOrCreate(rowMap, u.as_of_date).nikkei_high = u.nikkei_high;
   upserted += await upsertRows(analytics, plan.lowRows.map((r) => ({ ...r, ...stamp })), dryRun);
   for (const u of plan.lowRows) getOrCreate(rowMap, u.as_of_date).nikkei_low = u.nikkei_low;
-  return { pending: pending.length, upserted, missing: plan.missing.length };
+  return { pending: pending.length, upserted, missing: plan.missing.length, source };
 }
 
 /**

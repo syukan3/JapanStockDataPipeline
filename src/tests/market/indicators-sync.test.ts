@@ -7,6 +7,19 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+const { mockOfficial, mockYahooBars } = vi.hoisted(() => ({
+  mockOfficial: vi.fn(),
+  mockYahooBars: vi.fn(),
+}));
+vi.mock('@/lib/market/nikkei-official-client', () => ({
+  fetchNikkeiOfficialDaily: mockOfficial,
+  NIKKEI_OFFICIAL_CSV_FROM: '2023-01-04',
+}));
+vi.mock('@/lib/market/yahoo-chart-client', () => ({
+  BROWSER_USER_AGENT: 'test-ua',
+  fetchNikkeiDailyBars: mockYahooBars,
+}));
+
 vi.mock('@/lib/utils/logger', () => ({
   createLogger: vi.fn(() => ({
     info: vi.fn(),
@@ -20,6 +33,8 @@ import {
   planDaily2Updates,
   planRatioUpserts,
   planYahooUpdates,
+  isOhlcPending,
+  fillYahoo,
   emptyRow,
   type IndicatorRow,
 } from '@/lib/market/indicators-sync';
@@ -219,5 +234,75 @@ describe('planRatioUpserts', () => {
     const rowMap = mapWithCounts(axis);
     rowMap.get('D025')!.adv_dec_ratio_25d = 200;
     expect(planRatioUpserts(axis, rowMap, new Set(['D001']))).toEqual([]);
+  });
+});
+
+describe('isOhlcPending', () => {
+  it('公式CSV収録開始(2023-01-04)より前はOHLC nullでもpending扱いしない', () => {
+    const row = rowWith('2022-06-01', { nikkei_close: 27000 });
+    expect(isOhlcPending('2022-06-01', row)).toBe(false);
+  });
+
+  it('収録開始以降はOHLCいずれかがnullならpending', () => {
+    const row = rowWith('2023-01-04', { nikkei_close: 25716.86, nikkei_open: 25834.93 });
+    expect(isOhlcPending('2023-01-04', row)).toBe(true);
+  });
+
+  it('close未取得は期間を問わずpending / OHLC全て揃えば非pending', () => {
+    expect(isOhlcPending('2022-06-01', rowWith('2022-06-01', {}))).toBe(true);
+    expect(isOhlcPending('2022-06-01', undefined)).toBe(true);
+    const full = rowWith('2023-01-04', {
+      nikkei_close: 25716.86,
+      nikkei_open: 25834.93,
+      nikkei_high: 25840.68,
+      nikkei_low: 25661.89,
+    });
+    expect(isOhlcPending('2023-01-04', full)).toBe(false);
+  });
+});
+
+describe('fillYahoo: 公式CSV一次+Yahooフォールバック', () => {
+  it('公式CSVが成功したら source=official でYahooを呼ばない', async () => {
+    mockOfficial.mockResolvedValueOnce([
+      { date: '2026-07-15', close: 68751.51, open: 68000.1, high: 68800.2, low: 67900.3 },
+      { date: '2026-07-16', close: 66835.54, open: 67900.43, high: 68069.82, low: 66499.49 },
+    ]);
+    const rowMap = new Map<string, IndicatorRow>();
+    const summary = await fillYahoo(
+      {} as never,
+      ['2026-07-15', '2026-07-16'],
+      rowMap,
+      true // dryRun: DBに触れない
+    );
+    expect(summary.source).toBe('official');
+    expect(summary.pending).toBe(2);
+    expect(summary.missing).toBe(0);
+    expect(mockYahooBars).not.toHaveBeenCalled();
+    expect(rowMap.get('2026-07-16')?.nikkei_high).toBe(68069.82);
+  });
+
+  it('公式CSVがthrowしたらYahooへフォールバックし source=yahoo', async () => {
+    mockOfficial.mockRejectedValueOnce(new Error('HTTP 500'));
+    mockYahooBars.mockResolvedValueOnce([
+      { date: '2026-07-16', close: 66835.54, open: null, high: null, low: null },
+    ]);
+    const rowMap = new Map<string, IndicatorRow>();
+    const summary = await fillYahoo({} as never, ['2026-07-16'], rowMap, true);
+    expect(summary.source).toBe('yahoo');
+    expect(mockYahooBars).toHaveBeenCalledWith('2026-07-16', '2026-07-16');
+    expect(rowMap.get('2026-07-16')?.nikkei_close).toBe(66835.54);
+    expect(rowMap.get('2026-07-16')?.nikkei_high).toBeNull();
+  });
+
+  it('pendingの日付範囲外の公式CSV行はウィンドウ化で除外される', async () => {
+    mockOfficial.mockResolvedValueOnce([
+      { date: '2023-01-04', close: 25716.86, open: 25834.93, high: 25840.68, low: 25661.89 },
+      { date: '2026-07-16', close: 66835.54, open: 67900.43, high: 68069.82, low: 66499.49 },
+    ]);
+    const rowMap = new Map<string, IndicatorRow>();
+    const summary = await fillYahoo({} as never, ['2026-07-16'], rowMap, true);
+    expect(summary.pending).toBe(1);
+    expect(rowMap.has('2023-01-04')).toBe(false);
+    expect(rowMap.get('2026-07-16')?.nikkei_open).toBe(67900.43);
   });
 });
