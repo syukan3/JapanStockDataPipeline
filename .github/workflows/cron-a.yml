@@ -115,12 +115,24 @@ jobs:
       # 株価(equity_bars)とマスタ(equity_master)の両方が成功した時のみ実行（古い/部分株価での公開を防ぐ）。
       # rebase 失敗時もスキップ（分割日に未調整の adj でスナップショットを公開しない）。
       - name: Refresh technical metrics (analytics.technical_metrics)
+        id: refresh_technical
         if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success' && steps.rebase.outcome == 'success'
         continue-on-error: true
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/refresh-technical.ts
+
+      # 類似銘柄検索用ファクターベクトル（analytics.stock_factor_vectors）を再計算。
+      # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
+      # analytics.stock_screen（technical_metrics 反映後の結合ビュー）を読むため refresh_technical の後段に置く。
+      - name: Refresh factor vectors (analytics.stock_factor_vectors)
+        if: always() && steps.refresh_technical.outcome == 'success'
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/refresh-factor-vectors.ts
 
       # 市場全体指標（analytics.market_indicators）を forward-fill 更新。
       # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
