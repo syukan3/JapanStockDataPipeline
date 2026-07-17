@@ -13,7 +13,7 @@
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-type SchemaName = 'jquants_core' | 'jquants_ingest' | 'analytics' | 'public';
+type SchemaName = 'jquants_core' | 'jquants_ingest' | 'analytics' | 'portfolio' | 'public';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabaseClient = SupabaseClient<any, any, any>;

@@ -23,6 +23,7 @@ const BATCH_SIZES: Record<string, number> = {
   earnings_calendar: 1000,         // ~0.5KB/行 × 1000 = 500KB (raw_json削除後)
   trading_calendar: 2000,          // ~0.2KB/行 × 2000 = 400KB (raw_json削除後)
   topix_bar_daily: 2000,           // ~0.2KB/行 × 2000 = 400KB (raw_json削除後)
+  weekly_margin_interest: 500,     // ~0.3KB/行 × 500 = 150KB
 };
 
 const DEFAULT_BATCH_SIZE = 500;

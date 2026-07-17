@@ -58,6 +58,7 @@ export default defineConfig({
         // jquants endpoints
         'src/lib/jquants/endpoints/equity-master.ts',
         'src/lib/jquants/endpoints/equity-bars-daily.ts',
+        'src/lib/jquants/endpoints/weekly-margin-interest.ts',
         // external API clients
         'src/lib/fred/client.ts',
         'src/lib/fred/series-config.ts',
