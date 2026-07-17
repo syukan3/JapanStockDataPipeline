@@ -18,6 +18,7 @@
     "seed:financial": "tsx scripts/seed/financial.ts",
     "seed:earnings": "tsx scripts/seed/earnings.ts",
     "seed:investors": "tsx scripts/seed/investor-types.ts",
+    "seed:weekly-margin": "tsx scripts/seed/weekly-margin-interest.ts",
     "seed:all": "tsx scripts/seed/index.ts",
     "cron:direct": "tsx scripts/cron/cron-a-direct.ts",
     "cron:d": "tsx scripts/cron/cron-d-direct.ts",
