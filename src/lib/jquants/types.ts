@@ -532,6 +532,45 @@ export interface InvestorTypeTradingResponse {
 }
 
 // ============================================
+// 信用取引週末残高
+// ============================================
+
+/**
+ * 信用取引週末残高（1銘柄・1週分）
+ * V2フィールド: Date, Code, ShrtVol, LongVol, ShrtNegVol, LongNegVol, ShrtStdVol, LongStdVol, IssType
+ *
+ * NOTE: 申込日（Date）ベースの週次データ。営業日が2日以下の週はデータ無し（欠落週が正常）。
+ */
+export interface WeeklyMarginInterestItem {
+  /** 申込日 (YYYY-MM-DD) */
+  Date: string;
+  /** ローカルコード (5桁) */
+  Code: string;
+  /** 売り残高合計（株数） */
+  ShrtVol?: number | null;
+  /** 買い残高合計（株数） */
+  LongVol?: number | null;
+  /** 売り残高・一般信用（株数） */
+  ShrtNegVol?: number | null;
+  /** 買い残高・一般信用（株数） */
+  LongNegVol?: number | null;
+  /** 売り残高・制度信用（株数） */
+  ShrtStdVol?: number | null;
+  /** 買い残高・制度信用（株数） */
+  LongStdVol?: number | null;
+  /** 銘柄区分: "1"=信用銘柄, "2"=貸借銘柄, "3"=その他 */
+  IssType?: string | null;
+}
+
+/**
+ * GET /v2/markets/margin-interest レスポンス
+ */
+export interface WeeklyMarginInterestResponse {
+  data: WeeklyMarginInterestItem[];
+  pagination_key?: string;
+}
+
+// ============================================
 // DBテーブル用マッピング型
 // ============================================
 
@@ -717,6 +756,21 @@ export interface EarningsCalendarRecord {
   fiscal_quarter?: string;
   sector_name?: string;
   ingested_at?: string;
+}
+
+/**
+ * weekly_margin_interest テーブル用
+ */
+export interface WeeklyMarginInterestRecord {
+  local_code: string;
+  application_date: string;
+  short_total: number | null;
+  long_total: number | null;
+  short_negotiable: number | null;
+  long_negotiable: number | null;
+  short_standardized: number | null;
+  long_standardized: number | null;
+  issue_type: number | null;
 }
 
 /**

@@ -142,3 +142,17 @@ export {
   type FetchInvestorTypesParams,
   type SyncInvestorTypesResult,
 } from './investor-types';
+
+// 信用取引週末残高
+export {
+  syncWeeklyMarginInterest,
+  syncWeeklyMarginInterestWithWindow,
+  fetchWeeklyMarginInterest,
+  toWeeklyMarginInterestRecord,
+  fetchProtectedLocalCodes,
+  pruneWeeklyMarginInterest,
+  getLatestWeeklyMarginInterestDateFromDB,
+  type FetchWeeklyMarginInterestParams,
+  type SyncWeeklyMarginInterestResult,
+  type PruneWeeklyMarginInterestResult,
+} from './weekly-margin-interest';

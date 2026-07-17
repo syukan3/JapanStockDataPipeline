@@ -20,6 +20,7 @@ import type {
   FinancialSummaryResponse,
   EarningsCalendarResponse,
   InvestorTypeTradingResponse,
+  WeeklyMarginInterestResponse,
   TradingCalendarItem,
   EquityMasterItem,
   EquityBarDailyItem,
@@ -27,6 +28,7 @@ import type {
   FinancialSummaryItem,
   EarningsCalendarItem,
   InvestorTypeTradingItem,
+  WeeklyMarginInterestItem,
 } from './types';
 
 const BASE_URL = 'https://api.jquants.com/v2';
@@ -349,6 +351,33 @@ export class JQuantsClient {
       { params }
     );
   }
+
+  /**
+   * 信用取引週末残高取得（ページネーション対応）
+   * V2 エンドポイント: GET /v2/markets/margin-interest
+   */
+  async *getWeeklyMarginInterestPaginated(
+    params: { code?: string; date?: string; from?: string; to?: string }
+  ): AsyncGenerator<WeeklyMarginInterestItem[], void, unknown> {
+    yield* this.requestPaginated<WeeklyMarginInterestItem, WeeklyMarginInterestResponse>(
+      '/markets/margin-interest',
+      'data',
+      { params }
+    );
+  }
+
+  /**
+   * 信用取引週末残高全件取得
+   */
+  async getWeeklyMarginInterest(
+    params: { code?: string; date?: string; from?: string; to?: string }
+  ): Promise<WeeklyMarginInterestItem[]> {
+    return this.fetchAllPages<WeeklyMarginInterestItem, WeeklyMarginInterestResponse>(
+      '/markets/margin-interest',
+      'data',
+      { params }
+    );
+  }
 }
 
 /**
@@ -367,4 +396,5 @@ export type {
   FinancialSummaryItem,
   EarningsCalendarItem,
   InvestorTypeTradingItem,
+  WeeklyMarginInterestItem,
 };

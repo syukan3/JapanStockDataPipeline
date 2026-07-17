@@ -305,6 +305,62 @@ describe('jquants/client.ts', () => {
     });
   });
 
+  describe('getWeeklyMarginInterest', () => {
+    it('信用取引週末残高を全ページ取得する', async () => {
+      vi.mocked(fetchWithRetry)
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({
+            data: [{ Code: '13010', Date: '2026-07-03' }],
+            pagination_key: 'page2',
+          }),
+        } as Response)
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({
+            data: [{ Code: '13010', Date: '2026-07-10' }],
+          }),
+        } as Response);
+
+      const client = new JQuantsClient();
+      const result = await client.getWeeklyMarginInterest({ code: '13010' });
+
+      expect(result).toHaveLength(2);
+      expect(fetchWithRetry).toHaveBeenCalledTimes(2);
+      expect(fetchWithRetry).toHaveBeenCalledWith(
+        expect.stringContaining('/markets/margin-interest'),
+        expect.any(Object),
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe('getWeeklyMarginInterestPaginated', () => {
+    it('ページごとにデータをyieldする', async () => {
+      vi.mocked(fetchWithRetry)
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({
+            data: [{ Code: '13010', Date: '2026-07-03' }],
+            pagination_key: 'page2',
+          }),
+        } as Response)
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({
+            data: [{ Code: '13010', Date: '2026-07-10' }],
+          }),
+        } as Response);
+
+      const client = new JQuantsClient();
+      const pages: unknown[][] = [];
+
+      for await (const page of client.getWeeklyMarginInterestPaginated({ code: '13010' })) {
+        pages.push(page);
+      }
+
+      expect(pages).toHaveLength(2);
+      expect(pages[0]).toHaveLength(1);
+      expect(pages[1]).toHaveLength(1);
+    });
+  });
+
   describe('エラーハンドリング', () => {
     it('NonRetryableErrorを伝播する', async () => {
       vi.mocked(fetchWithRetry).mockRejectedValue(
