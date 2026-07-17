@@ -1,0 +1,36 @@
+name: Cron F - Weekly Margin Interest Sync
+run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
+on:
+  # J-Quants Standard 契約後に有効化する（契約後Runbook参照）。
+  # 未契約のまま定期実行すると 401/403 で毎週失敗メールが飛ぶためコメントアウトで用意。
+  # schedule:
+  #   - cron: '30 20 * * 2'  # JST 水曜 05:30（週次、前週末の残高公表後）
+  workflow_dispatch:
+    inputs:
+      dispatch_label:
+        description: '外部トリガー識別ラベル（pg_cron発火時に付与・二重実行防止用）'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: cron-f
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Sync Weekly Margin Interest
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+        run: npx tsx scripts/cron/cron-f-direct.ts
