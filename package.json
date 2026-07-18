@@ -23,6 +23,7 @@
     "cron:direct": "tsx scripts/cron/cron-a-direct.ts",
     "cron:d": "tsx scripts/cron/cron-d-direct.ts",
     "seed:market": "tsx scripts/seed/market-indicators.ts",
+    "seed:short-ratio": "tsx scripts/seed/short-ratio.ts",
     "cron:market": "tsx scripts/cron/refresh-market-indicators.ts",
     "cron:rebase": "tsx scripts/cron/rebase-adjusted-bars.ts"
   },
