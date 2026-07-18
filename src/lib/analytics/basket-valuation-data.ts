@@ -46,6 +46,39 @@ export function parseBasketConstituentRow(raw: RawBasketConstituentRow): BasketC
 }
 
 // ============================================================
+// equity_master（業種自動導出の構成銘柄）
+// ============================================================
+
+/**
+ * jquants_core.equity_master（is_current=true）から sector33_name 一致の現行銘柄コードを
+ * 昇順で取得する。constituent_source='sector33_auto' のバスケット（銀行業等）の
+ * 構成銘柄自動導出に使う（seed と refresh-sector-basket-constituents で共有）。
+ */
+export async function fetchSector33Constituents(
+  core: Client,
+  sector33Filter: string
+): Promise<string[]> {
+  const codes: string[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await core
+      .from('equity_master')
+      .select('local_code')
+      .eq('is_current', true)
+      .eq('sector33_name', sector33Filter)
+      .order('local_code', { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) {
+      throw new Error(`equity_master fetch failed (${sector33Filter}): ${error.message}`);
+    }
+    const rows = (data as { local_code: string }[] | null) ?? [];
+    for (const r of rows) codes.push(r.local_code);
+    if (rows.length < PAGE) break;
+  }
+  return codes;
+}
+
+// ============================================================
 // financial_disclosure（PIT 素材）
 // ============================================================
 

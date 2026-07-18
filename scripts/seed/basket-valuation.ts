@@ -1,23 +1,36 @@
 #!/usr/bin/env tsx
 /**
- * テーマバスケット割安判定の初回バックフィル+構成銘柄投入スクリプト
+ * テーマバスケット割安判定の初回バックフィル+構成銘柄投入スクリプト（複数バスケット対応）
  *
- * @description 日経半導体株指数 (200A) の構成30銘柄+ETF(200A0)の日足を J-Quants API から
- * 直接取得（DBには書かない）し、jquants_core.financial_disclosure の PIT（point-in-time）
- * 参照と組み合わせて、アンカー日ウエート係数（basket_constituents）と日次集計
- * （basket_metrics 2019-01-04〜）を analytics へ投入する。
+ * @description バスケットの構成銘柄+ETFの日足を J-Quants API から直接取得（DBには書かない）し、
+ * jquants_core.financial_disclosure の PIT（point-in-time）参照と組み合わせて、アンカー日
+ * ウエート係数（basket_constituents）と日次集計（basket_metrics）を analytics へ投入する。
+ *
+ * 構成銘柄の決定方法（constituent_source）:
+ *   - curated（200A / 日経半導体株指数）: 手動キュレーションの30銘柄を時価総額加重+機械キャップ
+ *     （通常15% / 非半導体主業5%）で水充填。アンカー日は直近定期見直し日。
+ *   - sector33_auto（銀行業/1615）: equity_master(is_current=true) の sector33_name 一致から
+ *     構成銘柄を自動導出。キャップ無し＝時価総額シェアそのものがウエート（weight_factor=1）。
+ *     公式指数は存在しないが、NAV軸（ETF実勢価格 vs 模擬指数）が同一スケールで意味を持つよう、
+ *     curatedと同じくベンチマークETFの実勢価格をアンカー値に使う（合成基準値は使わない）。
  *
  * 書き込み先は analytics.basket_definitions / basket_constituents / basket_metrics の
  * 3テーブルのみ（冪等 upsert。再実行可）。
  *
- * 計画書: docs/PLANS-basket-valuation-2026-07.md（ルートリポ）、DDL: 00105
+ * NOTE: 価格は equity_bar_daily（アーカイブ安全弁でローリング保持・現状 約1年強）ではなく
+ * J-Quants API のローリング10年ウィンドウから直接取得する。5年（2019〜）のバックフィルは
+ * DB保持窓に収まらないため（DB経由では不可能）、API直取得が必須。DBへ株価を書き込むことは無い。
+ *
+ * 計画書: docs/PLANS-entry-timing-2026-07.md / docs/PLANS-basket-valuation-2026-07.md（ルートリポ）
+ * DDL: 00105（3テーブル）/ 00106（constituent_source・sector33_filter 列追加）
  *
  * @example
  * ```
- * npm run seed:basket -- --dry-run              # DB書き込みなしで全計算+検証レポート
- * npm run seed:basket -- --dry-run --limit 30   # 直近30営業日分のみ投入対象にして反復
- * npm run seed:basket                            # 本実行（価格はローカルキャッシュ利用）
- * npm run seed:basket -- --refresh-cache         # 価格キャッシュを破棄して再取得
+ * npm run seed:basket -- --dry-run                              # 200A のみ計算+検証（DB書込なし）
+ * npm run seed:basket -- --basket=topix33-banks-1615 --dry-run  # 銀行業のみ
+ * npm run seed:basket -- --all                                  # 全バスケット本実行
+ * npm run seed:basket -- --basket=topix33-banks-1615            # 銀行業のみ本実行
+ * npm run seed:basket -- --refresh-cache                        # 価格キャッシュを破棄して再取得
  * ```
  */
 
@@ -30,7 +43,8 @@ import {
   extractSplitEvents,
   cumulativeAdjustmentFactor,
   pitFy,
-  waterFillCap,
+  resolveConstituentWeights,
+  effectiveCoverageWeight,
   buildConstituentDay,
   aggregateBasketDay,
   chainIndexSeries,
@@ -40,45 +54,21 @@ import {
   type SplitEvent,
   type ConstituentDay,
   type BasketDayAggregate,
+  type ConstituentSourceConfig,
+  type AnchorMcapInput,
 } from '../../src/lib/analytics/basket-valuation';
 import {
   fetchDisclosuresGrouped,
   buildPitByCode,
+  fetchSector33Constituents,
 } from '../../src/lib/analytics/basket-valuation-data';
 import { getJSTDate, addDays } from '../../src/lib/utils/date';
+import type { JQuantsClient } from '../../src/lib/jquants/client';
+import type { batchUpsert } from '../../src/lib/utils/batch';
 
 // ============================================================
-// バスケット定義（2025年11月末入替後の現行30銘柄）
+// バスケット設定（constituent_source 別）
 // ============================================================
-
-const BASKET_ID = 'nkscd-200a';
-const DISPLAY_NAME = '日経半導体株指数 (200A)';
-const BENCHMARK_CODE = '200A0';
-/** 直近定期見直し（2025年11月末）の最終営業日 */
-const ANCHOR_DATE = '2025-11-28';
-/** basket_metrics の投入開始日（financial_disclosure が 2019-01〜のため） */
-const METRICS_FROM = '2019-01-04';
-/**
- * 価格取得開始日の希望値。実際は J-Quants Standard のローリング10年ウィンドウ
- * （実測: 今日-10年より前の from は HTTP 400）にクランプされる。
- * バックフィルに必要なのは 2019-01 以降（分割イベントも開示 2019-01〜より後のみ影響）
- * のため、クランプされても計算には影響しない。
- */
-const PRICE_FROM_TARGET = '2015-07-01';
-
-/** ローリング10年ウィンドウの安全な開始日（境界ちょうどを避けて+2日マージン） */
-function clampToApiWindow(today: string, target: string): string {
-  const [y, m, d] = today.split('-').map(Number);
-  const boundary = new Date(Date.UTC(y - 10, m - 1, d));
-  boundary.setUTCDate(boundary.getUTCDate() + 2);
-  const windowStart = boundary.toISOString().slice(0, 10);
-  return target > windowStart ? target : windowStart;
-}
-/** このカバレッジ%未満の日は basket_metrics を書かない */
-const COVERAGE_MIN_PCT = 50;
-const CAP_DEFAULT = 0.15;
-/** 半導体を主業としない銘柄の定期見直し時キャップ（仮決め: 信越化学/ソニーG/HOYA） */
-const CAP_NON_SEMICON = 0.05;
 
 interface ConstituentDef {
   code: string;
@@ -86,7 +76,30 @@ interface ConstituentDef {
   isSemiconMain: boolean;
 }
 
-const CONSTITUENTS: ConstituentDef[] = [
+type SourceDef =
+  | { kind: 'curated'; capMain: number; capOther: number; constituents: ConstituentDef[] }
+  | { kind: 'sector33_auto'; sector33Filter: string };
+
+interface BasketSeedConfig {
+  basketId: string;
+  displayName: string;
+  benchmarkCode: string;
+  description: string;
+  /** basket_metrics の投入開始日（financial_disclosure が 2019-01〜のため） */
+  metricsFrom: string;
+  /**
+   * curated: 固定アンカー日（直近定期見直し日）。
+   * sector33_auto: undefined（公式指数の実在値が無いため、バックフィル系列の最初の営業日を
+   * 実行時にアンカーとして採用する）。
+   */
+  anchorDate?: string;
+  /** 検証レポートの個別PER突合対象（200A=80350/TEL）。無ければ突合をスキップ */
+  spotCheckCode?: string;
+  source: SourceDef;
+}
+
+/** 2025年11月末入替後の現行30銘柄（200A・curated） */
+const CONSTITUENTS_200A: ConstituentDef[] = [
   { code: '285A0', name: 'キオクシアHD', isSemiconMain: true },
   { code: '31320', name: 'マクニカHD', isSemiconMain: true },
   { code: '34360', name: 'SUMCO', isSemiconMain: true },
@@ -119,6 +132,59 @@ const CONSTITUENTS: ConstituentDef[] = [
   { code: '81540', name: '加賀電子', isSemiconMain: true },
 ];
 
+const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
+  'nkscd-200a': {
+    basketId: 'nkscd-200a',
+    displayName: '日経半導体株指数 (200A)',
+    benchmarkCode: '200A0',
+    description:
+      '日経半導体株指数の現行30銘柄を時価総額加重+機械キャップ(通常15%/非半導体主業5%)で模擬。' +
+      '公式ウエートではなくアンカー日の機械キャップ適用値を使用。',
+    metricsFrom: '2019-01-04',
+    anchorDate: '2025-11-28',
+    spotCheckCode: '80350',
+    source: {
+      kind: 'curated',
+      capMain: 0.15,
+      // 半導体を主業としない銘柄の定期見直し時キャップ（仮決め: 信越化学/ソニーG/HOYA）
+      capOther: 0.05,
+      constituents: CONSTITUENTS_200A,
+    },
+  },
+  'topix33-banks-1615': {
+    basketId: 'topix33-banks-1615',
+    displayName: '銀行業 (1615)',
+    benchmarkCode: '16150',
+    description:
+      'TOPIX-33業種「銀行業」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。模擬指数は構成銘柄データが揃う最初の営業日にベンチマークETF(1615)の' +
+      '実勢価格を基準として同一スケールで連結する。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '銀行業' },
+  },
+};
+
+const DEFAULT_BASKET_ID = 'nkscd-200a';
+
+/**
+ * 価格取得開始日の希望値。実際は J-Quants Standard のローリング10年ウィンドウ
+ * （実測: 今日-10年より前の from は HTTP 400）にクランプされる。
+ * バックフィルに必要なのは 2019-01 以降のため、クランプされても計算には影響しない。
+ */
+const PRICE_FROM_TARGET = '2015-07-01';
+
+/** ローリング10年ウィンドウの安全な開始日（境界ちょうどを避けて+2日マージン） */
+function clampToApiWindow(today: string, target: string): string {
+  const [y, m, d] = today.split('-').map(Number);
+  const boundary = new Date(Date.UTC(y - 10, m - 1, d));
+  boundary.setUTCDate(boundary.getUTCDate() + 2);
+  const windowStart = boundary.toISOString().slice(0, 10);
+  return target > windowStart ? target : windowStart;
+}
+
+/** このカバレッジ%未満の日は basket_metrics を書かない */
+const COVERAGE_MIN_PCT = 50;
+
 // ============================================================
 // CLI
 // ============================================================
@@ -131,6 +197,8 @@ interface CliOptions {
   refreshCache: boolean;
   /** 集計終了日（デフォルト: JST昨日） */
   to?: string;
+  /** 対象バスケットID一覧 */
+  basketIds: string[];
 }
 
 function parseCliArgs(): CliOptions {
@@ -139,7 +207,9 @@ function parseCliArgs(): CliOptions {
     dryRun: false,
     cacheDir: join(tmpdir(), 'basket-valuation-cache'),
     refreshCache: false,
+    basketIds: [DEFAULT_BASKET_ID],
   };
+  let explicitBaskets: string[] | null = null;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -148,6 +218,13 @@ function parseCliArgs(): CliOptions {
       options.dryRun = true;
     } else if (arg === '--refresh-cache') {
       options.refreshCache = true;
+    } else if (arg === '--all') {
+      explicitBaskets = Object.keys(BASKET_CONFIGS);
+    } else if (arg === '--basket' && nextArg) {
+      explicitBaskets = [nextArg];
+      i++;
+    } else if (arg.startsWith('--basket=')) {
+      explicitBaskets = [arg.slice('--basket='.length)];
     } else if (arg === '--limit' && nextArg) {
       const limit = parseInt(nextArg, 10);
       if (isNaN(limit) || limit <= 0) {
@@ -167,6 +244,18 @@ function parseCliArgs(): CliOptions {
       options.to = nextArg;
       i++;
     }
+  }
+
+  if (explicitBaskets) {
+    for (const id of explicitBaskets) {
+      if (!BASKET_CONFIGS[id]) {
+        console.error(
+          `Unknown --basket: ${id}. Known: ${Object.keys(BASKET_CONFIGS).join(', ')}`
+        );
+        process.exit(1);
+      }
+    }
+    options.basketIds = explicitBaskets;
   }
 
   return options;
@@ -231,23 +320,88 @@ async function main(): Promise<SeedResult> {
   const { batchUpsert } = await import('../../src/lib/utils/batch');
 
   const to = options.to ?? addDays(getJSTDate(), -1);
-  if (to < ANCHOR_DATE) {
-    throw new Error(`--to (${to}) must be on/after anchor date ${ANCHOR_DATE}`);
-  }
   const priceFrom = clampToApiWindow(getJSTDate(), PRICE_FROM_TARGET);
 
+  const jq = createJQuantsClient();
+  const core = createAdminClient('jquants_core');
+  const analytics = createAdminClient('analytics');
+  const deps: SeedDeps = { jq, core, analytics, batchUpsert, priceFrom, to, options };
+
   console.log('Starting Basket Valuation Seed');
-  console.log(`  Basket:    ${BASKET_ID} (${CONSTITUENTS.length} constituents + ${BENCHMARK_CODE})`);
-  console.log(`  Anchor:    ${ANCHOR_DATE}`);
-  console.log(`  Metrics:   ${METRICS_FROM} .. ${to}`);
+  console.log(`  Baskets:   ${options.basketIds.join(', ')}`);
   console.log(`  Cache:     ${options.cacheDir}${options.refreshCache ? ' (refresh)' : ''}`);
   if (options.limit) console.log(`  Limit:     last ${options.limit} days`);
   if (options.dryRun) console.log('  Dry run:   no DB writes');
 
   mkdirSync(options.cacheDir, { recursive: true });
 
-  // ---------- Step 1: 価格取得（30銘柄 + 200A0、API直接・キャッシュ付き） ----------
-  const jq = createJQuantsClient();
+  let fetched = 0;
+  let inserted = 0;
+  const errors: Error[] = [];
+  for (const basketId of options.basketIds) {
+    const config = BASKET_CONFIGS[basketId];
+    console.log(`\n==================== ${config.basketId} (${config.displayName}) ====================`);
+    const result = await seedOneBasket(config, deps);
+    fetched += result.fetched;
+    inserted += result.inserted;
+    errors.push(...result.errors);
+  }
+
+  const seedResult: SeedResult = {
+    name: 'Basket Valuation',
+    fetched,
+    inserted,
+    errors,
+    durationMs: timer(),
+  };
+  logResult(seedResult);
+  return seedResult;
+}
+
+// Supabaseクライアントはスキーマ束縛の動的型のため any で受ける（repo慣習）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Client = any;
+
+interface SeedDeps {
+  jq: JQuantsClient;
+  core: Client;
+  analytics: Client;
+  batchUpsert: typeof batchUpsert;
+  priceFrom: string;
+  to: string;
+  options: CliOptions;
+}
+
+/** 1バスケット分のバックフィル */
+async function seedOneBasket(
+  config: BasketSeedConfig,
+  deps: SeedDeps
+): Promise<{ fetched: number; inserted: number; errors: Error[] }> {
+  const { jq, core, analytics, batchUpsert, priceFrom, to, options } = deps;
+  const source = config.source;
+
+  if (source.kind === 'curated' && to < config.anchorDate!) {
+    throw new Error(`--to (${to}) must be on/after anchor date ${config.anchorDate}`);
+  }
+  if (to < config.metricsFrom) {
+    throw new Error(`--to (${to}) must be on/after metrics start ${config.metricsFrom}`);
+  }
+
+  // ---------- Step 0: 構成銘柄の決定（curated=固定リスト / sector33_auto=equity_master 導出） ----------
+  let constituents: ConstituentDef[];
+  if (source.kind === 'curated') {
+    constituents = source.constituents;
+  } else {
+    const codes = await fetchSector33Constituents(core, source.sector33Filter);
+    if (codes.length === 0) {
+      throw new Error(`No equity_master constituents for sector33_name='${source.sector33Filter}'`);
+    }
+    constituents = codes.map((code) => ({ code, name: code, isSemiconMain: true }));
+    console.log(`Auto-derived constituents (${source.sector33Filter}): ${constituents.length}`);
+  }
+  const constituentCodes = constituents.map((c) => c.code);
+
+  // ---------- Step 1: 価格取得（構成銘柄 + ベンチマークETF、API直接・キャッシュ付き） ----------
   const fetchBars = async (code: string, from: string, toDate: string): Promise<SlimBar[]> => {
     const items = await jq.getEquityBarsDaily({ code, from, to: toDate });
     return items.map((item) => ({
@@ -258,9 +412,9 @@ async function main(): Promise<SeedResult> {
     }));
   };
 
-  const allCodes = [...CONSTITUENTS.map((c) => c.code), BENCHMARK_CODE];
+  const allCodes = [...constituentCodes, config.benchmarkCode];
   const barsByCode = new Map<string, SlimBar[]>();
-  const priceProgress = createProgress(allCodes.length, 'basket_prices');
+  const priceProgress = createProgress(allCodes.length, `${config.basketId}_prices`);
   let fetched = 0;
   for (const code of allCodes) {
     const bars = await loadPricesWithCache(
@@ -288,80 +442,97 @@ async function main(): Promise<SeedResult> {
   }
 
   // ---------- Step 2: PIT 財務系列（financial_disclosure を読み取りのみ） ----------
-  const core = createAdminClient('jquants_core');
-  const constituentCodes = CONSTITUENTS.map((c) => c.code);
   const disclosuresByCode = await fetchDisclosuresGrouped(core, constituentCodes);
   const pitByCode = buildPitByCode(disclosuresByCode);
   console.log(
     `Disclosures loaded: ${[...disclosuresByCode.values()].reduce((s, r) => s + r.length, 0)} rows`
   );
 
-  // ---------- Step 3: アンカー日の weight_factor（機械キャップ・水充填） ----------
-  const anchorMcaps: { code: string; mcap: number }[] = [];
-  const missingAtAnchor: string[] = [];
-  for (const def of CONSTITUENTS) {
-    const close = closeByCode.get(def.code)?.get(ANCHOR_DATE);
-    const fy = pitFy(pitByCode.get(def.code)!.fy, ANCHOR_DATE);
-    if (close == null || !fy?.sharesOutstanding) {
-      missingAtAnchor.push(`${def.code} (close=${close}, fy=${fy?.disclosedDate})`);
-      continue;
-    }
-    const cum = cumulativeAdjustmentFactor(
-      splitEventsByCode.get(def.code) ?? [], fy.disclosedDate, ANCHOR_DATE
-    );
-    anchorMcaps.push({ code: def.code, mcap: close * (fy.sharesOutstanding / cum) });
-  }
-  if (missingAtAnchor.length > 0) {
-    throw new Error(`Anchor data missing for: ${missingAtAnchor.join(', ')}`);
-  }
-
-  const totalAnchorMcap = anchorMcaps.reduce((s, m) => s + m.mcap, 0);
-  const capInputs = anchorMcaps.map((m) => ({
-    code: m.code,
-    rawShare: m.mcap / totalAnchorMcap,
-    capLimit: CONSTITUENTS.find((c) => c.code === m.code)!.isSemiconMain
-      ? CAP_DEFAULT
-      : CAP_NON_SEMICON,
-  }));
-  const cappedWeights = waterFillCap(capInputs);
-
-  const weightFactorByCode = new Map<string, number>();
-  const officialWeightByCode = new Map<string, number>();
-  for (const input of capInputs) {
-    const capped = cappedWeights.get(input.code)!;
-    weightFactorByCode.set(input.code, capped / input.rawShare);
-    officialWeightByCode.set(input.code, capped * 100);
-  }
-
-  const anchorIndexLevel = adjCloseByCode.get(BENCHMARK_CODE)?.get(ANCHOR_DATE);
-  if (anchorIndexLevel == null) {
-    throw new Error(`No ${BENCHMARK_CODE} adj_close on anchor date ${ANCHOR_DATE}`);
-  }
-
-  console.log(`Anchor index level (${BENCHMARK_CODE} adj_close @ ${ANCHOR_DATE}): ${anchorIndexLevel}`);
-  console.log('Anchor weights (capped):');
-  for (const def of CONSTITUENTS) {
-    const weight = officialWeightByCode.get(def.code)!;
-    const factor = weightFactorByCode.get(def.code)!;
-    console.log(
-      `  ${def.code} ${def.name}: weight=${weight.toFixed(2)}% factor=${factor.toFixed(4)}` +
-        `${def.isSemiconMain ? '' : ' [5% cap]'}`
-    );
-  }
-
-  // ---------- Step 4: 日次 basket_metrics（メモリ上で全計算） ----------
+  // ---------- Step 3: 対象営業日の系列を確定（構成銘柄のclose日の和集合） ----------
   const dateSet = new Set<string>();
   for (const code of constituentCodes) {
     for (const [date] of closeByCode.get(code) ?? []) {
-      if (date >= METRICS_FROM && date <= to) dateSet.add(date);
+      if (date >= config.metricsFrom && date <= to) dateSet.add(date);
     }
   }
   const dates = [...dateSet].sort();
+  if (dates.length === 0) {
+    throw new Error(`No trading days in [${config.metricsFrom}, ${to}] for ${config.basketId}`);
+  }
+  const lastDate = dates[dates.length - 1];
 
+  // ---------- Step 4: ウエート係数（curated=水充填キャップ / sector33_auto=一律1） ----------
+  // アンカー日/基準値の確定は日次集計の後（Step 5b）に行う。sector33_auto は「構成銘柄データが
+  // 揃う最初の営業日」を基準にするため、先に集計結果が必要になる。
+  const weightFactorByCode = new Map<string, number>();
+  const officialWeightByCode = new Map<string, number | null>();
+  let curatedAnchorLevel: number | null = null;
+
+  if (source.kind === 'curated') {
+    const anchorDateC = config.anchorDate!;
+    const anchors: AnchorMcapInput[] = [];
+    const missingAtAnchor: string[] = [];
+    for (const def of constituents) {
+      const close = closeByCode.get(def.code)?.get(anchorDateC);
+      const fy = pitFy(pitByCode.get(def.code)!.fy, anchorDateC);
+      if (close == null || !fy?.sharesOutstanding) {
+        missingAtAnchor.push(`${def.code} (close=${close}, fy=${fy?.disclosedDate})`);
+        continue;
+      }
+      const cum = cumulativeAdjustmentFactor(
+        splitEventsByCode.get(def.code) ?? [], fy.disclosedDate, anchorDateC
+      );
+      anchors.push({
+        code: def.code,
+        mcap: close * (fy.sharesOutstanding / cum),
+        isSemiconMain: def.isSemiconMain,
+      });
+    }
+    if (missingAtAnchor.length > 0) {
+      throw new Error(`Anchor data missing for: ${missingAtAnchor.join(', ')}`);
+    }
+    const sourceConfig: ConstituentSourceConfig = {
+      kind: 'curated',
+      capMain: source.capMain,
+      capOther: source.capOther,
+    };
+    for (const r of resolveConstituentWeights(sourceConfig, anchors)) {
+      weightFactorByCode.set(r.code, r.weightFactor);
+      officialWeightByCode.set(r.code, r.officialWeight);
+    }
+    const level = adjCloseByCode.get(config.benchmarkCode)?.get(anchorDateC);
+    if (level == null) {
+      throw new Error(`No ${config.benchmarkCode} adj_close on anchor date ${anchorDateC}`);
+    }
+    curatedAnchorLevel = level;
+
+    console.log('Anchor weights (capped):');
+    for (const def of constituents) {
+      const weight = officialWeightByCode.get(def.code);
+      const factor = weightFactorByCode.get(def.code)!;
+      console.log(
+        `  ${def.code} ${def.name}: weight=${weight?.toFixed(2)}% factor=${factor.toFixed(4)}` +
+          `${def.isSemiconMain ? '' : ' [cap5%]'}`
+      );
+    }
+  } else {
+    // sector33_auto: weight_factor=1・official_weight=null（キャップ無し=時価総額シェアそのもの）
+    const anchors: AnchorMcapInput[] = constituents.map((def) => ({
+      code: def.code,
+      mcap: 0,
+      isSemiconMain: true,
+    }));
+    for (const r of resolveConstituentWeights({ kind: 'sector33_auto' }, anchors)) {
+      weightFactorByCode.set(r.code, r.weightFactor);
+      officialWeightByCode.set(r.code, r.officialWeight);
+    }
+  }
+
+  // ---------- Step 5: 日次 basket_metrics（メモリ上で全計算） ----------
+  const N = constituents.length;
   const aggByDate = new Map<string, BasketDayAggregate>();
   const weightsByDate = new Map<string, Map<string, number>>();
   const perStockPer = new Map<string, number>(); // 検証用: 最終日の個別PER（t基準）
-  const lastDate = dates[dates.length - 1];
 
   for (const date of dates) {
     const items: ConstituentDay[] = [];
@@ -370,7 +541,7 @@ async function main(): Promise<SeedResult> {
         {
           code,
           factor: weightFactorByCode.get(code)!,
-          officialWeight: officialWeightByCode.get(code)!,
+          officialWeight: effectiveCoverageWeight(officialWeightByCode.get(code) ?? null, N),
           close: closeByCode.get(code)?.get(date),
           pit: pitByCode.get(code)!,
           events: splitEventsByCode.get(code) ?? [],
@@ -395,31 +566,44 @@ async function main(): Promise<SeedResult> {
     perStockPer.set(code, close / (fy.eps * cum));
   }
 
+  // ---------- Step 5b: 模擬指数のアンカーを確定 ----------
+  // curated は固定アンカー日 + ベンチマークETF実値。sector33_auto は公式指数が存在しないが、
+  // NAV軸（ETF実勢価格 vs 模擬指数の直接比較）が同一スケールで意味を持つよう、
+  // curatedと同じく**ベンチマークETFのadj_close**をアンカー値に使う（合成値1000は使わない。
+  // index_levelとetf_closeが別スケールだとcomputeNavAxisの乖離%が構造的に無意味になるため）。
+  // アンカー日は構成銘柄データ（価格+PIT）が揃う最初の営業日（先頭の財務未開示期間はカバレッジ0で
+  // 除外されるため、そこをアンカーにすると連結が始点で断絶する）。
+  let anchorDate: string;
+  let anchorIndexLevel: number;
+  if (source.kind === 'curated') {
+    anchorDate = config.anchorDate!;
+    anchorIndexLevel = curatedAnchorLevel!;
+  } else {
+    const firstWithData = dates.find((d) => (weightsByDate.get(d)?.size ?? 0) > 0);
+    if (!firstWithData) {
+      throw new Error(`No date with constituent price+PIT data for ${config.basketId}`);
+    }
+    const benchmarkLevel = adjCloseByCode.get(config.benchmarkCode)?.get(firstWithData);
+    if (benchmarkLevel == null) {
+      throw new Error(
+        `No ${config.benchmarkCode} adj_close on first-data date ${firstWithData} for ${config.basketId}`
+      );
+    }
+    anchorDate = firstWithData;
+    anchorIndexLevel = benchmarkLevel;
+  }
+  console.log(`Anchor: ${anchorDate}  index_level=${anchorIndexLevel}  (source=${source.kind})`);
+
   const constituentAdjCloses = new Map<string, Map<string, number>>();
   for (const code of constituentCodes) {
     constituentAdjCloses.set(code, adjCloseByCode.get(code) ?? new Map());
   }
   const indexLevels = chainIndexSeries(
-    dates, weightsByDate, constituentAdjCloses, ANCHOR_DATE, anchorIndexLevel
+    dates, weightsByDate, constituentAdjCloses, anchorDate, anchorIndexLevel
   );
 
   const round = (v: number | null | undefined, dp: number): number | null =>
     v == null ? null : Number(v.toFixed(dp));
-
-  interface MetricRow {
-    basket_id: string;
-    as_of_date: string;
-    index_level: number | null;
-    etf_close: number | null;
-    weighted_per: number | null;
-    weighted_per_forward: number | null;
-    weighted_pbr: number | null;
-    weighted_psr: number | null;
-    weighted_div_yield: number | null;
-    weighted_eps_level: number | null;
-    coverage_pct: number | null;
-    updated_at: string;
-  }
 
   const nowIso = new Date().toISOString();
   const allMetricRows: MetricRow[] = [];
@@ -436,10 +620,10 @@ async function main(): Promise<SeedResult> {
         ? level / agg.weightedPer
         : null;
     allMetricRows.push({
-      basket_id: BASKET_ID,
+      basket_id: config.basketId,
       as_of_date: date,
       index_level: round(level, 4),
-      etf_close: round(adjCloseByCode.get(BENCHMARK_CODE)?.get(date) ?? null, 4),
+      etf_close: round(adjCloseByCode.get(config.benchmarkCode)?.get(date) ?? null, 4),
       weighted_per: round(agg.weightedPer, 2),
       weighted_per_forward: round(agg.weightedPerForward, 2),
       weighted_pbr: round(agg.weightedPbr, 2),
@@ -459,18 +643,20 @@ async function main(): Promise<SeedResult> {
   // ---------- DB 書き込み（basket_* 3テーブルのみ） ----------
   let inserted = 0;
   const errors: Error[] = [];
-  const analytics = createAdminClient('analytics');
+  // sector33_auto は現行構成の観測日として run 日（=to）を valid_from にする
+  // （refresh-sector-basket-constituents が新規追加時に valid_from=当日 とするのと整合）。
+  const constituentValidFrom = source.kind === 'curated' ? anchorDate : to;
   if (!options.dryRun) {
     const { error: defError } = await analytics.from('basket_definitions').upsert(
       {
-        basket_id: BASKET_ID,
-        display_name: DISPLAY_NAME,
-        benchmark_code: BENCHMARK_CODE,
-        description:
-          '日経半導体株指数の現行30銘柄を時価総額加重+機械キャップ(通常15%/非半導体主業5%)で模擬。' +
-          '公式ウエートではなくアンカー日の機械キャップ適用値を使用。',
-        anchor_date: ANCHOR_DATE,
+        basket_id: config.basketId,
+        display_name: config.displayName,
+        benchmark_code: config.benchmarkCode,
+        description: config.description,
+        anchor_date: anchorDate,
         anchor_index_level: round(anchorIndexLevel, 4),
+        constituent_source: source.kind,
+        sector33_filter: source.kind === 'sector33_auto' ? source.sector33Filter : null,
         updated_at: nowIso,
       },
       { onConflict: 'basket_id' }
@@ -478,32 +664,36 @@ async function main(): Promise<SeedResult> {
     if (defError) throw new Error(`basket_definitions upsert failed: ${defError.message}`);
     inserted += 1;
 
-    const constituentRows = CONSTITUENTS.map((def) => ({
-      basket_id: BASKET_ID,
-      local_code: def.code,
-      weight_factor: Number(weightFactorByCode.get(def.code)!.toFixed(8)),
-      official_weight: Number(officialWeightByCode.get(def.code)!.toFixed(3)),
-      is_semicon_main: def.isSemiconMain,
-      valid_from: ANCHOR_DATE,
-      valid_to: null,
-    }));
+    const constituentRows = constituents.map((def) => {
+      const ow = officialWeightByCode.get(def.code) ?? null;
+      return {
+        basket_id: config.basketId,
+        local_code: def.code,
+        weight_factor: Number(weightFactorByCode.get(def.code)!.toFixed(8)),
+        official_weight: ow == null ? null : Number(ow.toFixed(3)),
+        is_semicon_main: def.isSemiconMain,
+        valid_from: constituentValidFrom,
+        valid_to: null,
+      };
+    });
     const { error: conError } = await analytics
       .from('basket_constituents')
       .upsert(constituentRows, { onConflict: 'basket_id,local_code,valid_from' });
     if (conError) throw new Error(`basket_constituents upsert failed: ${conError.message}`);
     inserted += constituentRows.length;
 
-    const metricProgress = createProgress(metricRows.length, 'basket_metrics');
+    const metricProgress = createProgress(metricRows.length, `${config.basketId}_metrics`);
     const result = await batchUpsert(analytics, 'basket_metrics', metricRows, 'basket_id,as_of_date', {
       batchSize: 500,
-      onBatchComplete: (_batch, done) => metricProgress.set(Math.min(done, metricRows.length)),
+      onBatchComplete: (_batch: number, done: number) =>
+        metricProgress.set(Math.min(done, metricRows.length)),
     });
     metricProgress.done();
     inserted += result.inserted;
     errors.push(...result.errors);
   }
 
-  // ---------- Step 5: 検証レポート ----------
+  // ---------- Step 6: 検証レポート ----------
   const { data: smRows, error: smError } = await analytics
     .from('stock_metrics')
     .select('local_code, per, market_cap')
@@ -514,10 +704,13 @@ async function main(): Promise<SeedResult> {
   }
 
   printVerificationReport({
+    benchmarkCode: config.benchmarkCode,
+    anchorDate,
+    spotCheckCode: config.spotCheckCode,
     dates,
     aggByDate,
     indexLevels,
-    etfAdjCloses: adjCloseByCode.get(BENCHMARK_CODE) ?? new Map(),
+    etfAdjCloses: adjCloseByCode.get(config.benchmarkCode) ?? new Map(),
     allMetricRows,
     perStockPer,
     lastDate,
@@ -525,19 +718,26 @@ async function main(): Promise<SeedResult> {
     smRows: (smRows ?? []) as StockMetricsRow[],
   });
 
-  const seedResult: SeedResult = {
-    name: 'Basket Valuation',
-    fetched,
-    inserted,
-    errors,
-    durationMs: timer(),
-  };
-  logResult(seedResult);
-  return seedResult;
+  return { fetched, inserted, errors };
+}
+
+interface MetricRow {
+  basket_id: string;
+  as_of_date: string;
+  index_level: number | null;
+  etf_close: number | null;
+  weighted_per: number | null;
+  weighted_per_forward: number | null;
+  weighted_pbr: number | null;
+  weighted_psr: number | null;
+  weighted_div_yield: number | null;
+  weighted_eps_level: number | null;
+  coverage_pct: number | null;
+  updated_at: string;
 }
 
 // ============================================================
-// 検証レポート（仕様書 Step 5）
+// 検証レポート
 // ============================================================
 
 interface StockMetricsRow {
@@ -547,6 +747,9 @@ interface StockMetricsRow {
 }
 
 interface VerificationInput {
+  benchmarkCode: string;
+  anchorDate: string;
+  spotCheckCode?: string;
   dates: string[];
   aggByDate: Map<string, BasketDayAggregate>;
   indexLevels: Map<string, number>;
@@ -560,6 +763,7 @@ interface VerificationInput {
 
 function printVerificationReport(input: VerificationInput): void {
   const {
+    benchmarkCode, anchorDate, spotCheckCode,
     dates, aggByDate, indexLevels, etfAdjCloses, allMetricRows,
     perStockPer, lastDate, weightFactorByCode, smRows,
   } = input;
@@ -569,8 +773,7 @@ function printVerificationReport(input: VerificationInput): void {
   console.log('VERIFICATION REPORT');
   console.log('========================================');
 
-  // 1) 模擬指数 vs 200A0: 日次リターン相関・年率TE
-  //    アンカー日以降は構成が公式と一致するため、全期間との差が「過去の構成固定近似」の影響を示す
+  // 1) 模擬指数 vs ベンチマークETF: 日次リターン相関・年率TE
   const trackingStats = (from: string): string => {
     const pairDates = dates.filter(
       (d) => d >= from && indexLevels.has(d) && etfAdjCloses.has(d)
@@ -590,9 +793,9 @@ function printVerificationReport(input: VerificationInput): void {
       `corr=${corr?.toFixed(4) ?? 'N/A'} TE=${te?.toFixed(2) ?? 'N/A'}%`
     );
   };
-  console.log(`\n[1] Sim index vs ${BENCHMARK_CODE} daily returns (corr target >= 0.95):`);
+  console.log(`\n[1] Sim index vs ${benchmarkCode} daily returns (corr target >= 0.95):`);
   console.log(`    since 2024-06: ${trackingStats('2024-06-01')}`);
-  console.log(`    since anchor:  ${trackingStats(ANCHOR_DATE)}`);
+  console.log(`    since anchor:  ${trackingStats(anchorDate)}`);
 
   // 2) 直近 weighted_per vs stock_metrics 個別値からの手計算
   const lastAgg = aggByDate.get(lastDate);
@@ -621,16 +824,18 @@ function printVerificationReport(input: VerificationInput): void {
     console.log('    note: stock_metrics は赤字銘柄の per を NULL にするため手計算は対象銘柄が減る');
   }
 
-  // 3) 東京エレクトロン(80350) の個別PER突合（stock_metrics 51.89 @2026-07-17 目安）
-  const telPer = perStockPer.get('80350');
-  const telSmPer = toNum(smRows.find((r) => r.local_code === '80350')?.per ?? null);
-  const diffPct =
-    telPer != null && telSmPer != null ? ((telPer - telSmPer) / telSmPer) * 100 : null;
-  console.log(`\n[3] TEL(80350) PER @ ${lastDate}:`);
-  console.log(
-    `    computed = ${telPer?.toFixed(2) ?? 'N/A'} / stock_metrics = ${telSmPer?.toFixed(2) ?? 'N/A'}` +
-      ` / diff = ${diffPct?.toFixed(2) ?? 'N/A'}% (target within ±10%)`
-  );
+  // 3) 個別PER突合（spotCheckCode 指定時のみ。200A=80350/TEL）
+  if (spotCheckCode) {
+    const spotPer = perStockPer.get(spotCheckCode);
+    const spotSmPer = toNum(smRows.find((r) => r.local_code === spotCheckCode)?.per ?? null);
+    const diffPct =
+      spotPer != null && spotSmPer != null ? ((spotPer - spotSmPer) / spotSmPer) * 100 : null;
+    console.log(`\n[3] ${spotCheckCode} PER @ ${lastDate}:`);
+    console.log(
+      `    computed = ${spotPer?.toFixed(2) ?? 'N/A'} / stock_metrics = ${spotSmPer?.toFixed(2) ?? 'N/A'}` +
+        ` / diff = ${diffPct?.toFixed(2) ?? 'N/A'}% (target within ±10%)`
+    );
+  }
 
   // 4) カバレッジ推移（年別平均）
   console.log('\n[4] Coverage by year (avg %):');
@@ -658,8 +863,8 @@ function printVerificationReport(input: VerificationInput): void {
   const trough = avgPer('2025-04');
   const latest = allMetricRows[allMetricRows.length - 1];
   console.log('\n[5] weighted_per sanity:');
-  console.log(`    2024-07 (高値圏) avg = ${peak?.avg.toFixed(2) ?? 'N/A'} (${peak?.n ?? 0} days)`);
-  console.log(`    2025-04 (急落後) avg = ${trough?.avg.toFixed(2) ?? 'N/A'} (${trough?.n ?? 0} days)`);
+  console.log(`    2024-07 avg = ${peak?.avg.toFixed(2) ?? 'N/A'} (${peak?.n ?? 0} days)`);
+  console.log(`    2025-04 avg = ${trough?.avg.toFixed(2) ?? 'N/A'} (${trough?.n ?? 0} days)`);
   console.log(`    latest (${latest?.as_of_date ?? 'N/A'}) = ${latest?.weighted_per ?? 'N/A'}`);
   console.log('========================================');
 }
@@ -680,4 +885,4 @@ if (isDirectRun) {
     });
 }
 
-export { main as seedBasketValuation, CONSTITUENTS, BASKET_ID, ANCHOR_DATE };
+export { main as seedBasketValuation, BASKET_CONFIGS };
