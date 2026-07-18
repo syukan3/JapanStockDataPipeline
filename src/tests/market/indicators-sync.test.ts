@@ -36,7 +36,10 @@ import {
   isOhlcPending,
   fillYahoo,
   emptyRow,
+  aggregateShortSellingByDate,
+  planShortSellingOfficial,
   type IndicatorRow,
+  type ShortSellingSectorRow,
 } from '@/lib/market/indicators-sync';
 import type { DailyBar } from '@/lib/market/yahoo-chart-client';
 
@@ -134,6 +137,148 @@ describe('planDaily2Updates', () => {
     const rowMap = new Map<string, IndicatorRow>();
     const plan = planDaily2Updates(['2026-07-01'], rowMap, []);
     expect(plan.noSource).toBe(1);
+  });
+});
+
+describe('planDaily2Updates: skipShortSelling ゲート（公式データ切替）', () => {
+  it('デフォルト（未指定）は空売り2成分を従来どおり書き込む', () => {
+    const plan = planDaily2Updates(['2026-07-01'], new Map(), [src('2026-07-01')]);
+    expect(plan.ssRestrictedRows).toHaveLength(1);
+    expect(plan.ssUnrestrictedRows).toHaveLength(1);
+  });
+
+  it('skipShortSelling=true は空売り2成分を一切書かない（per/vi/close は従来どおり）', () => {
+    const plan = planDaily2Updates(['2026-07-01'], new Map(), [src('2026-07-01')], {
+      skipShortSelling: true,
+    });
+    expect(plan.ssRestrictedRows).toEqual([]);
+    expect(plan.ssUnrestrictedRows).toEqual([]);
+    expect(plan.perRows).toHaveLength(1);
+    expect(plan.viRows).toHaveLength(1);
+    expect(plan.closeRows).toHaveLength(1);
+  });
+
+  it('空売りソース欠損日: 非skipは noSource=1 / skip では 0（空売り欠損で失敗扱いしない）', () => {
+    const makeMap = () =>
+      new Map([
+        [
+          '2026-07-01',
+          rowWith('2026-07-01', { nikkei_close: 40000, nikkei_per: 18, nikkei_vi: 22 }),
+        ],
+      ]);
+    const noSs = src('2026-07-01', {
+      shortSellingRestricted: null,
+      shortSellingUnrestricted: null,
+    });
+    expect(planDaily2Updates(['2026-07-01'], makeMap(), [noSs]).noSource).toBe(1);
+    expect(
+      planDaily2Updates(['2026-07-01'], makeMap(), [noSs], { skipShortSelling: true }).noSource
+    ).toBe(0);
+  });
+});
+
+describe('aggregateShortSellingByDate', () => {
+  function sector(
+    date: string,
+    sell: number | null,
+    withRes: number | null,
+    noRes: number | null
+  ): ShortSellingSectorRow {
+    return {
+      as_of_date: date,
+      selling_ex_short_value: sell,
+      short_with_restrictions_value: withRes,
+      short_without_restrictions_value: noRes,
+    };
+  }
+
+  it('全業種を合算し分母（3列合計）で規制あり/なし比率[%]を算出する', () => {
+    // sell=1000, with=400, no=100 → denom=1500 → restricted=26.67, unrestricted=6.67
+    const agg = aggregateShortSellingByDate([
+      sector('2026-07-15', 600, 300, 100),
+      sector('2026-07-15', 400, 100, 0),
+    ]);
+    expect(agg.get('2026-07-15')).toEqual({ restricted: 26.67, unrestricted: 6.67 });
+  });
+
+  it('null金額は0として扱う', () => {
+    // sell=600, with=300, no=100 → denom=1000 → restricted=30, unrestricted=10
+    const agg = aggregateShortSellingByDate([
+      sector('2026-07-15', null, 300, 100),
+      sector('2026-07-15', 600, null, null),
+    ]);
+    expect(agg.get('2026-07-15')).toEqual({ restricted: 30, unrestricted: 10 });
+  });
+
+  it('分母0以下の日は比率算出不能として含めない', () => {
+    const agg = aggregateShortSellingByDate([sector('2026-07-15', 0, 0, 0)]);
+    expect(agg.has('2026-07-15')).toBe(false);
+  });
+
+  it('日付ごとに独立して集計する', () => {
+    const agg = aggregateShortSellingByDate([
+      sector('2026-07-14', 800, 200, 0),
+      sector('2026-07-15', 900, 0, 100),
+    ]);
+    expect(agg.get('2026-07-14')).toEqual({ restricted: 20, unrestricted: 0 });
+    expect(agg.get('2026-07-15')).toEqual({ restricted: 0, unrestricted: 10 });
+  });
+});
+
+describe('planShortSellingOfficial', () => {
+  const agg = new Map([['2026-07-15', { restricted: 30, unrestricted: 10 }]]);
+
+  it('fill-null: 2成分がNULLの日を両列同時に書く', () => {
+    expect(planShortSellingOfficial(['2026-07-15'], new Map(), agg, false)).toEqual([
+      {
+        as_of_date: '2026-07-15',
+        short_selling_ratio_restricted: 30,
+        short_selling_ratio_unrestricted: 10,
+      },
+    ]);
+  });
+
+  it('fill-null: 2成分が既に非NULLの日はスキップ', () => {
+    const rowMap = new Map([
+      [
+        '2026-07-15',
+        rowWith('2026-07-15', {
+          short_selling_ratio_restricted: 28,
+          short_selling_ratio_unrestricted: 8,
+        }),
+      ],
+    ]);
+    expect(planShortSellingOfficial(['2026-07-15'], rowMap, agg, false)).toEqual([]);
+  });
+
+  it('fill-null: 片方だけNULLの半端な日は両列を書き直す', () => {
+    const rowMap = new Map([
+      ['2026-07-15', rowWith('2026-07-15', { short_selling_ratio_restricted: 28 })],
+    ]);
+    expect(planShortSellingOfficial(['2026-07-15'], rowMap, agg, false)).toHaveLength(1);
+  });
+
+  it('overwrite=true: 既存の非NULL値も公式値で上書きする', () => {
+    const rowMap = new Map([
+      [
+        '2026-07-15',
+        rowWith('2026-07-15', {
+          short_selling_ratio_restricted: 99,
+          short_selling_ratio_unrestricted: 99,
+        }),
+      ],
+    ]);
+    expect(planShortSellingOfficial(['2026-07-15'], rowMap, agg, true)).toEqual([
+      {
+        as_of_date: '2026-07-15',
+        short_selling_ratio_restricted: 30,
+        short_selling_ratio_unrestricted: 10,
+      },
+    ]);
+  });
+
+  it('集計値の無い日はスキップ（overwriteでも書かない）', () => {
+    expect(planShortSellingOfficial(['2026-07-16'], new Map(), agg, true)).toEqual([]);
   });
 });
 

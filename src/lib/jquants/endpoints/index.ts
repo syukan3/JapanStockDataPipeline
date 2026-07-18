@@ -156,3 +156,12 @@ export {
   type SyncWeeklyMarginInterestResult,
   type PruneWeeklyMarginInterestResult,
 } from './weekly-margin-interest';
+// 業種別空売り比率
+export {
+  syncShortRatio,
+  fetchShortRatio,
+  toShortSellingSectorRecord,
+  resolveShortRatioWindow,
+  type SyncShortRatioOptions,
+  type SyncShortRatioResult,
+} from './short-ratio';

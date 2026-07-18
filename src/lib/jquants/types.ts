@@ -571,6 +571,38 @@ export interface WeeklyMarginInterestResponse {
 }
 
 // ============================================
+// 業種別空売り比率
+// ============================================
+
+/**
+ * 業種別空売り比率（1業種×1日分）
+ * V2フィールド: Date, S33, SellExShortVa, ShrtWithResVa, ShrtNoResVa
+ *
+ * NOTE: 金額は円建て。市場全体の空売り比率は全33業種を合算して算出する
+ * （restricted% = ΣShrtWithResVa / Σ(SellExShortVa+ShrtWithResVa+ShrtNoResVa) × 100）。
+ */
+export interface ShortRatioItem {
+  /** 日付 (YYYY-MM-DD) */
+  Date: string;
+  /** 33業種コード */
+  S33: string;
+  /** 実注文の売り代金[円] */
+  SellExShortVa?: number | null;
+  /** 空売り（価格規制あり）代金[円] */
+  ShrtWithResVa?: number | null;
+  /** 空売り（価格規制なし）代金[円] */
+  ShrtNoResVa?: number | null;
+}
+
+/**
+ * GET /v2/markets/short-ratio レスポンス
+ */
+export interface ShortRatioResponse {
+  data: ShortRatioItem[];
+  pagination_key?: string;
+}
+
+// ============================================
 // DBテーブル用マッピング型
 // ============================================
 
@@ -785,6 +817,17 @@ export interface InvestorTypeTradingRecord {
   metric: string;
   value_kjpy?: number;
   ingested_at?: string;
+}
+
+/**
+ * analytics.short_selling_sector テーブル用（業種別空売り金額）
+ */
+export interface ShortSellingSectorRecord {
+  as_of_date: string;
+  sector33_code: string;
+  selling_ex_short_value: number | null;
+  short_with_restrictions_value: number | null;
+  short_without_restrictions_value: number | null;
 }
 
 // ============================================
