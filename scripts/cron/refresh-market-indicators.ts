@@ -47,10 +47,12 @@ import {
   upsertRows,
   fillYahoo,
   fillDaily2,
+  fillShortSellingOfficial,
   fillWeekly,
   fillDerived,
   fillRatio,
 } from '../../src/lib/market/indicators-sync';
+import { syncShortRatio } from '../../src/lib/jquants/endpoints';
 
 /** 通常運転の走査窓（暦日）。祝日連休を挟んでも25営業日窓の再計算に足りる幅 */
 const WINDOW_DAYS = 45;
@@ -89,6 +91,12 @@ async function main(): Promise<void> {
   const skipBreadth = process.argv.includes('--skip-breadth');
   if (onlyBreadth && skipBreadth) throw new Error('--only-breadth と --skip-breadth は併用不可');
   if (dryRun) logger.info('DRY RUN: 読み取り＋計算のみ。書き込みは行わない');
+
+  // 空売り比率のソース切替ゲート。未設定（デフォルト）は現行の daily2 スクレイプのまま。
+  // SHORT_RATIO_SOURCE=jquants で J-Quants 業種別データ（公式）へ切替える:
+  //   daily2 は2成分の書き込みをスキップし、syncShortRatio→fillShortSellingOfficial が担当する。
+  const useOfficialShortRatio = process.env.SHORT_RATIO_SOURCE === 'jquants';
+  if (useOfficialShortRatio) logger.info('SHORT_RATIO_SOURCE=jquants: 空売り比率は公式データを使用');
 
   const core = createAdminClient('jquants_core');
   const analytics = createAdminClient('analytics');
@@ -153,9 +161,27 @@ async function main(): Promise<void> {
       failures.push(`yahoo: ${message(e)}`);
     }
     try {
-      summary.daily2 = await fillDaily2(analytics, externalDays, rowMap, dryRun);
+      summary.daily2 = await fillDaily2(analytics, externalDays, rowMap, dryRun, undefined, {
+        skipShortSelling: useOfficialShortRatio,
+      });
     } catch (e) {
       failures.push(`daily2: ${message(e)}`);
+    }
+    if (useOfficialShortRatio) {
+      try {
+        // 業種別データを直近ウィンドウで取得（dryRunでは short_selling_sector を変更しない）。
+        if (!dryRun) {
+          summary.shortRatioSync = await syncShortRatio({ to: externalCap });
+        }
+        summary.shortRatioOfficial = await fillShortSellingOfficial(
+          analytics,
+          externalDays,
+          rowMap,
+          dryRun
+        );
+      } catch (e) {
+        failures.push(`short-ratio: ${message(e)}`);
+      }
     }
     try {
       summary.weekly = await fillWeekly(analytics, windowStart, externalCap, rowMap, dryRun);

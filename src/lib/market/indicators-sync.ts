@@ -289,22 +289,27 @@ export async function fillDaily2(
   businessDays: string[],
   rowMap: Map<string, IndicatorRow>,
   dryRun: boolean,
-  prefetched?: Awaited<ReturnType<typeof fetchNikkei225jpDaily>>
+  prefetched?: Awaited<ReturnType<typeof fetchNikkei225jpDaily>>,
+  options?: { skipShortSelling?: boolean }
 ): Promise<Record<string, unknown>> {
+  // SHORT_RATIO_SOURCE=jquants 時は空売り比率2成分を公式データ（fillShortSellingOfficial）へ
+  // 委譲するため daily2 側では書かない。判定・書き込みの両方から2成分を除外する。
+  const skipShortSelling = options?.skipShortSelling ?? false;
   const pending = businessDays.filter((d) => {
     const r = rowMap.get(d);
     return (
       !r ||
       r.nikkei_per == null ||
       r.nikkei_vi == null ||
-      r.short_selling_ratio_restricted == null ||
-      r.short_selling_ratio_unrestricted == null ||
+      (!skipShortSelling &&
+        (r.short_selling_ratio_restricted == null ||
+          r.short_selling_ratio_unrestricted == null)) ||
       r.nikkei_close == null
     );
   });
   if (pending.length === 0) return { pending: 0, upserted: 0 };
   const rows = prefetched ?? (await fetchNikkei225jpDaily());
-  const plan = planDaily2Updates(pending, rowMap, rows);
+  const plan = planDaily2Updates(pending, rowMap, rows, { skipShortSelling });
   const stamp = { updated_at: new Date().toISOString() };
   // 列ごとに同一shapeでupsert（既存非NULL列へnullを送らない = 部分upsertの列保護）。
   // rowMap への反映は各グループの upsert 成功後に行う。
@@ -361,7 +366,8 @@ export function planDaily2Updates(
     nikkeiVi: number | null;
     shortSellingRestricted: number | null;
     shortSellingUnrestricted: number | null;
-  }>
+  }>,
+  options?: { skipShortSelling?: boolean }
 ): {
   perRows: Array<{ as_of_date: string; nikkei_per: number }>;
   viRows: Array<{ as_of_date: string; nikkei_vi: number }>;
@@ -381,6 +387,7 @@ export function planDaily2Updates(
     short_selling_ratio_unrestricted: number;
   }> = [];
   const closeRows: Array<{ as_of_date: string; nikkei_close: number }> = [];
+  const skipShortSelling = options?.skipShortSelling ?? false;
   let closeMismatch = 0;
   let noSource = 0;
   for (const date of pending) {
@@ -416,14 +423,22 @@ export function planDaily2Updates(
       viRows.push({ as_of_date: date, nikkei_vi: src.nikkeiVi });
       updatedAny = true;
     }
-    if (row.short_selling_ratio_restricted == null && src.shortSellingRestricted != null) {
+    if (
+      !skipShortSelling &&
+      row.short_selling_ratio_restricted == null &&
+      src.shortSellingRestricted != null
+    ) {
       ssRestrictedRows.push({
         as_of_date: date,
         short_selling_ratio_restricted: src.shortSellingRestricted,
       });
       updatedAny = true;
     }
-    if (row.short_selling_ratio_unrestricted == null && src.shortSellingUnrestricted != null) {
+    if (
+      !skipShortSelling &&
+      row.short_selling_ratio_unrestricted == null &&
+      src.shortSellingUnrestricted != null
+    ) {
       ssUnrestrictedRows.push({
         as_of_date: date,
         short_selling_ratio_unrestricted: src.shortSellingUnrestricted,
@@ -434,8 +449,9 @@ export function planDaily2Updates(
       !updatedAny &&
       (row.nikkei_per == null ||
         row.nikkei_vi == null ||
-        row.short_selling_ratio_restricted == null ||
-        row.short_selling_ratio_unrestricted == null)
+        (!skipShortSelling &&
+          (row.short_selling_ratio_restricted == null ||
+            row.short_selling_ratio_unrestricted == null)))
     ) {
       noSource++;
     }
@@ -449,6 +465,180 @@ export function planDaily2Updates(
     noSource,
     closeMismatch,
   };
+}
+
+// ============================================================
+// short-selling official（J-Quants 業種別空売り比率の市場全体集計）
+//
+// SHORT_RATIO_SOURCE=jquants 時に analytics.short_selling_sector（全33業種の売り注文
+// 代金内訳）を日次で合算し、market_indicators の空売り比率2成分を公式値で埋める。
+// 集計式は現行 daily2 定義（col22/col24）と一致（互換契約: 列名・単位・非null契約を維持）:
+//   restricted%   = ΣShrtWithResVa / Σ(SellExShortVa+ShrtWithResVa+ShrtNoResVa) × 100
+//   unrestricted% = ΣShrtNoResVa   / 同分母 × 100
+// 2成分は必ず同時に書く（片方だけ非nullの日を作らない）。
+// ============================================================
+
+/** short_selling_sector の1行（金額。numericは文字列で来るため toNum で正規化） */
+export interface ShortSellingSectorRow {
+  as_of_date: string;
+  selling_ex_short_value: number | null;
+  short_with_restrictions_value: number | null;
+  short_without_restrictions_value: number | null;
+}
+
+/** numeric(6,2) 相当（小数2桁）へ丸める */
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+/**
+ * 業種別空売り金額から日次の市場全体空売り比率2成分を集計する（純関数・テスト対象）
+ *
+ * - 日付ごとに全業種の3列を合算し、分母（3列合計）で規制あり/なしの比率[%]を出す。
+ * - 分母が0以下（全業種欠損・データ不整合）の日はマップに含めない（比率算出不能）。
+ */
+export function aggregateShortSellingByDate(
+  sectorRows: ShortSellingSectorRow[]
+): Map<string, { restricted: number; unrestricted: number }> {
+  const sums = new Map<string, { selling: number; restricted: number; unrestricted: number }>();
+  for (const r of sectorRows) {
+    const s = sums.get(r.as_of_date) ?? { selling: 0, restricted: 0, unrestricted: 0 };
+    s.selling += r.selling_ex_short_value ?? 0;
+    s.restricted += r.short_with_restrictions_value ?? 0;
+    s.unrestricted += r.short_without_restrictions_value ?? 0;
+    sums.set(r.as_of_date, s);
+  }
+  const out = new Map<string, { restricted: number; unrestricted: number }>();
+  for (const [date, s] of sums) {
+    const denom = s.selling + s.restricted + s.unrestricted;
+    if (denom <= 0) continue;
+    out.set(date, {
+      restricted: round2((s.restricted / denom) * 100),
+      unrestricted: round2((s.unrestricted / denom) * 100),
+    });
+  }
+  return out;
+}
+
+/**
+ * 公式空売り比率の更新payloadを組み立てる（純関数・テスト対象）
+ *
+ * - 2成分は必ず同時に書く（対象日は両列を同一payloadに含める）。
+ * - overwrite=false（日次）: 既存の2成分がどちらか NULL の日のみ対象（fill-null・冪等）。
+ * - overwrite=true（seed）: 集計値がある日は既存値に関わらず上書きする（daily2由来値の是正）。
+ * - rowMap は読み取りのみ（反映は呼び出し側が upsert 成功後に行う）。
+ */
+export function planShortSellingOfficial(
+  dates: string[],
+  rowMap: Map<string, IndicatorRow>,
+  aggregated: Map<string, { restricted: number; unrestricted: number }>,
+  overwrite: boolean
+): Array<{
+  as_of_date: string;
+  short_selling_ratio_restricted: number;
+  short_selling_ratio_unrestricted: number;
+}> {
+  const out: Array<{
+    as_of_date: string;
+    short_selling_ratio_restricted: number;
+    short_selling_ratio_unrestricted: number;
+  }> = [];
+  for (const date of dates) {
+    const agg = aggregated.get(date);
+    if (!agg) continue;
+    const row = rowMap.get(date);
+    const pending =
+      overwrite ||
+      row == null ||
+      row.short_selling_ratio_restricted == null ||
+      row.short_selling_ratio_unrestricted == null;
+    if (!pending) continue;
+    out.push({
+      as_of_date: date,
+      short_selling_ratio_restricted: agg.restricted,
+      short_selling_ratio_unrestricted: agg.unrestricted,
+    });
+  }
+  return out;
+}
+
+/** analytics.short_selling_sector を日付レンジで読み込む（金額はnumeric→数値へ正規化） */
+export async function loadShortSellingSector(
+  analytics: Client,
+  from: string,
+  to: string
+): Promise<ShortSellingSectorRow[]> {
+  const out: ShortSellingSectorRow[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await analytics
+      .from('short_selling_sector')
+      .select(
+        'as_of_date, selling_ex_short_value, short_with_restrictions_value, short_without_restrictions_value'
+      )
+      .gte('as_of_date', from)
+      .lte('as_of_date', to)
+      .order('as_of_date', { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) throw new Error(`Failed to load short_selling_sector: ${error.message}`);
+    const rows =
+      (data as Array<{
+        as_of_date: string;
+        selling_ex_short_value: unknown;
+        short_with_restrictions_value: unknown;
+        short_without_restrictions_value: unknown;
+      }> | null) ?? [];
+    for (const r of rows) {
+      out.push({
+        as_of_date: r.as_of_date,
+        selling_ex_short_value: toNum(r.selling_ex_short_value),
+        short_with_restrictions_value: toNum(r.short_with_restrictions_value),
+        short_without_restrictions_value: toNum(r.short_without_restrictions_value),
+      });
+    }
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
+/**
+ * 市場全体の空売り比率2成分を J-Quants 業種別データから埋める。
+ *
+ * @param businessDays 対象営業日（昇順）。この範囲の short_selling_sector を読み集計する。
+ * @param options.overwrite seed 用。既存の daily2 由来値も公式値で上書きする（デフォルト false）。
+ */
+export async function fillShortSellingOfficial(
+  analytics: Client,
+  businessDays: string[],
+  rowMap: Map<string, IndicatorRow>,
+  dryRun: boolean,
+  options?: { overwrite?: boolean }
+): Promise<Record<string, unknown>> {
+  if (businessDays.length === 0) return { aggregatedDays: 0, upserted: 0 };
+  const from = businessDays[0];
+  const to = businessDays[businessDays.length - 1];
+  const sectorRows = await loadShortSellingSector(analytics, from, to);
+  const aggregated = aggregateShortSellingByDate(sectorRows);
+  const plan = planShortSellingOfficial(
+    businessDays,
+    rowMap,
+    aggregated,
+    options?.overwrite ?? false
+  );
+  const stamp = { updated_at: new Date().toISOString() };
+  // 2成分は同一payloadなので1グループでupsert（片方だけ書く経路を作らない）。
+  const upserted = await upsertRows(
+    analytics,
+    plan.map((r) => ({ ...r, ...stamp })),
+    dryRun
+  );
+  // rowMap への反映は upsert 成功後
+  for (const u of plan) {
+    const row = getOrCreate(rowMap, u.as_of_date);
+    row.short_selling_ratio_restricted = u.short_selling_ratio_restricted;
+    row.short_selling_ratio_unrestricted = u.short_selling_ratio_unrestricted;
+  }
+  return { aggregatedDays: aggregated.size, upserted };
 }
 
 // ============================================================
