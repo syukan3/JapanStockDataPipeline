@@ -233,17 +233,21 @@ export async function syncWeeklyMarginInterestWithWindow(
 }
 
 /**
- * プルーニング保護対象の銘柄コード一覧を取得（保有 + ウォッチリスト）
+ * プルーニング保護対象の銘柄コード一覧を取得（保有 + ウォッチリスト + バスケット構成銘柄）
  *
  * - 保有: `portfolio.transactions` を集計し buy - sell > 0 の銘柄
  *   （未削除ポートフォリオのみ。transactions に deleted_at は無く親でフィルタ）
  * - ウォッチ: `portfolio.watchlist_items` の全銘柄
+ * - バスケット: `analytics.basket_constituents`（valid_to is null の現行構成銘柄）
+ *   テーマバスケット割安判定（[[basket-valuation]]）の信用需給軸で使うため、
+ *   構成銘柄の週次信用残は1年で痩せさせず全期間保持する。
  *
  * NOTE: Scouter src/lib/fetch-holdings.ts と同じ service_role クロススキーマ読み。
- * portfolio スキーマの列名変更時はこの関数の追随が必要。
+ * portfolio / analytics スキーマの列名変更時はこの関数の追随が必要。
  */
 export async function fetchProtectedLocalCodes(): Promise<string[]> {
   const portfolioClient = createAdminClient('portfolio');
+  const analyticsClient = createAdminClient('analytics');
 
   // 1. 未削除ポートフォリオのIDを取得
   const portfolios = await batchSelect<{ id: string; deleted_at: string | null }>(
@@ -283,7 +287,24 @@ export async function fetchProtectedLocalCodes(): Promise<string[]> {
     { columns: 'local_code', orderBy: { column: 'local_code' } }
   );
 
-  return [...new Set([...heldCodes, ...watchlistItems.map((w) => w.local_code)])].sort();
+  // 4. バスケット現行構成銘柄（valid_to is null）
+  const basketConstituents = await batchSelect<{ local_code: string }>(
+    analyticsClient,
+    'basket_constituents',
+    {
+      columns: 'local_code',
+      filter: { column: 'valid_to', operator: 'is', value: null },
+      orderBy: { column: 'local_code' },
+    }
+  );
+
+  return [
+    ...new Set([
+      ...heldCodes,
+      ...watchlistItems.map((w) => w.local_code),
+      ...basketConstituents.map((b) => b.local_code),
+    ]),
+  ].sort();
 }
 
 export interface PruneWeeklyMarginInterestResult {

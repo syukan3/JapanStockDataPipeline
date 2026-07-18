@@ -100,6 +100,7 @@ jobs:
       # 3つ全ての同期が成功した時のみ実行する（部分株価や stale な財務での再計算・公開を防ぐ）。
       # rebase 失敗時もスキップ（分割日に未調整の adj で指標を再計算・公開しない）。
       - name: Refresh factor metrics (analytics.stock_metrics)
+        id: refresh_stock_metrics
         if: always() && steps.equity_bars.outcome == 'success' && steps.equity_master.outcome == 'success' && steps.financial.outcome == 'success' && steps.rebase.outcome == 'success'
         run: |
           curl -X POST "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}/rest/v1/rpc/refresh_stock_metrics" \
@@ -133,6 +134,19 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/refresh-factor-vectors.ts
+
+      # テーマバスケット割安判定（analytics.basket_metrics）の日次集計。
+      # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
+      # 構成銘柄の当日 market_cap/per/pbr/psr/dividend_yield を analytics.stock_metrics
+      # から読むため、refresh_stock_metrics（前段）成功をゲート条件にする
+      # （basket_definitions が未投入の間は0件検出で正常終了する）。
+      - name: Refresh basket metrics (analytics.basket_metrics)
+        if: always() && steps.refresh_stock_metrics.outcome == 'success'
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/refresh-basket-metrics.ts
 
       # 市場全体指標（analytics.market_indicators）を forward-fill 更新。
       # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
