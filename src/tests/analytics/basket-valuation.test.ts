@@ -13,6 +13,9 @@ import {
   pitFy,
   pitForwardEps,
   waterFillCap,
+  resolveConstituentWeights,
+  effectiveCoverageWeight,
+  diffSectorConstituents,
   buildConstituentDay,
   aggregateBasketDay,
   chainIndexSeries,
@@ -22,6 +25,7 @@ import {
   type RawDisclosure,
   type ConstituentDay,
   type PitFinancials,
+  type AnchorMcapInput,
 } from '@/lib/analytics/basket-valuation';
 
 // ============================================================
@@ -273,6 +277,104 @@ describe('waterFillCap', () => {
   it('空入力は空Map、シェア合計0はエラー', () => {
     expect(waterFillCap([]).size).toBe(0);
     expect(() => waterFillCap([{ code: 'A', rawShare: 0, capLimit: 0.15 }])).toThrow();
+  });
+});
+
+// ============================================================
+// 構成銘柄ウエートの決定（curated / sector33_auto）
+// ============================================================
+
+describe('resolveConstituentWeights', () => {
+  const anchor = (code: string, mcap: number, isSemiconMain: boolean): AnchorMcapInput => ({
+    code,
+    mcap,
+    isSemiconMain,
+  });
+
+  it('curated: 水充填キャップの結果を weight_factor=capped/rawShare・official_weight=capped% で返す', () => {
+    // A(非主業/5%枠)=時価総額40%、B/C=各30%。A が 5% に固定され残り95%を B:C=1:1 で配分
+    const resolved = resolveConstituentWeights(
+      { kind: 'curated', capMain: 0.5, capOther: 0.05 },
+      [anchor('A', 40, false), anchor('B', 30, true), anchor('C', 30, true)]
+    );
+    const byCode = new Map(resolved.map((r) => [r.code, r]));
+    // rawShare: A=0.4, B=0.3, C=0.3 / capped: A=0.05, B=0.475, C=0.475
+    expect(byCode.get('A')!.officialWeight).toBeCloseTo(5);
+    expect(byCode.get('A')!.weightFactor).toBeCloseTo(0.05 / 0.4);
+    expect(byCode.get('B')!.officialWeight).toBeCloseTo(47.5);
+    expect(byCode.get('B')!.weightFactor).toBeCloseTo(0.475 / 0.3);
+    // 公式ウエート合計は100%
+    const sum = resolved.reduce((s, r) => s + (r.officialWeight ?? 0), 0);
+    expect(sum).toBeCloseTo(100);
+  });
+
+  it('curated: キャップ非超過なら weight_factor は全て1（時価総額シェアそのまま）', () => {
+    const resolved = resolveConstituentWeights(
+      { kind: 'curated', capMain: 0.9, capOther: 0.9 },
+      [anchor('A', 30, true), anchor('B', 70, true)]
+    );
+    for (const r of resolved) expect(r.weightFactor).toBeCloseTo(1);
+  });
+
+  it('curated: 時価総額合計0はエラー', () => {
+    expect(() =>
+      resolveConstituentWeights({ kind: 'curated', capMain: 0.15, capOther: 0.05 }, [
+        anchor('A', 0, true),
+      ])
+    ).toThrow();
+  });
+
+  it('sector33_auto: 全銘柄 weight_factor=1・official_weight=null（mcap は無視）', () => {
+    const resolved = resolveConstituentWeights({ kind: 'sector33_auto' }, [
+      anchor('83060', 999, true),
+      anchor('83160', 0, false),
+    ]);
+    expect(resolved).toEqual([
+      { code: '83060', weightFactor: 1, officialWeight: null },
+      { code: '83160', weightFactor: 1, officialWeight: null },
+    ]);
+  });
+});
+
+describe('effectiveCoverageWeight', () => {
+  it('curated（officialWeight あり）はその値をそのまま返す', () => {
+    expect(effectiveCoverageWeight(15, 30)).toBe(15);
+    expect(effectiveCoverageWeight(0, 30)).toBe(0);
+  });
+
+  it('sector33_auto（officialWeight=null）は均等按分 100/N を返す', () => {
+    expect(effectiveCoverageWeight(null, 80)).toBeCloseTo(1.25);
+    expect(effectiveCoverageWeight(null, 4)).toBe(25);
+  });
+
+  it('構成銘柄0件（N=0）は0（ゼロ割回避）', () => {
+    expect(effectiveCoverageWeight(null, 0)).toBe(0);
+  });
+});
+
+describe('diffSectorConstituents', () => {
+  it('新規（equity_master のみ）は toAdd、消滅（constituents のみ）は toClose', () => {
+    const diff = diffSectorConstituents(['A', 'B', 'C'], ['B', 'C', 'D']);
+    expect(diff.toAdd).toEqual(['A']);
+    expect(diff.toClose).toEqual(['D']);
+  });
+
+  it('変化なしは両方空', () => {
+    const diff = diffSectorConstituents(['A', 'B'], ['B', 'A']);
+    expect(diff.toAdd).toEqual([]);
+    expect(diff.toClose).toEqual([]);
+  });
+
+  it('全入替（重複なし）は全てが toAdd/toClose に分かれ、昇順で返る', () => {
+    const diff = diffSectorConstituents(['C', 'A'], ['Z', 'Y']);
+    expect(diff.toAdd).toEqual(['A', 'C']);
+    expect(diff.toClose).toEqual(['Y', 'Z']);
+  });
+
+  it('入力の重複は排除する', () => {
+    const diff = diffSectorConstituents(['A', 'A', 'B'], ['B', 'B']);
+    expect(diff.toAdd).toEqual(['A']);
+    expect(diff.toClose).toEqual([]);
   });
 });
 
