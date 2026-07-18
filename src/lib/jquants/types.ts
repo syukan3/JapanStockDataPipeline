@@ -567,6 +567,10 @@ export interface WeeklyMarginInterestItem {
  */
 export interface WeeklyMarginInterestResponse {
   data: WeeklyMarginInterestItem[];
+  pagination_key?: string;
+}
+
+// ============================================
 // 業種別空売り比率
 // ============================================
 

@@ -363,6 +363,12 @@ export class JQuantsClient {
   ): AsyncGenerator<WeeklyMarginInterestItem[], void, unknown> {
     yield* this.requestPaginated<WeeklyMarginInterestItem, WeeklyMarginInterestResponse>(
       '/markets/margin-interest',
+      'data',
+      { params }
+    );
+  }
+
+  /**
    * 業種別空売り比率取得（ページネーション対応）
    * V2 エンドポイント: GET /v2/markets/short-ratio
    */
@@ -384,6 +390,12 @@ export class JQuantsClient {
   ): Promise<WeeklyMarginInterestItem[]> {
     return this.fetchAllPages<WeeklyMarginInterestItem, WeeklyMarginInterestResponse>(
       '/markets/margin-interest',
+      'data',
+      { params }
+    );
+  }
+
+  /**
    * 業種別空売り比率全件取得
    */
   async getShortRatio(
