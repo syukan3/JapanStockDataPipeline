@@ -332,11 +332,14 @@ async function getPreviousBasketMetricsRow(
   basketId: string,
   beforeDate: string
 ): Promise<{ as_of_date: string; index_level: number | null } | null> {
+  // 起点は index_level が非null の直近行にする: 全銘柄欠損等で一度 null 行を書いても
+  // 翌日以降はその手前の確定値から連結し自己回復する（直前行固定だと null が伝播し続ける）
   const { data, error } = await analytics
     .from('basket_metrics')
     .select('as_of_date, index_level')
     .eq('basket_id', basketId)
     .lt('as_of_date', beforeDate)
+    .not('index_level', 'is', null)
     .order('as_of_date', { ascending: false })
     .limit(1);
   if (error) {

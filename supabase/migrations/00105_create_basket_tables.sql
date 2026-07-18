@@ -73,7 +73,7 @@ create table if not exists analytics.basket_metrics (
   as_of_date           date not null,
   -- 模擬指数（anchor_date = anchor_index_level で基準化した加重リターン連結）
   index_level          numeric(14,4),
-  -- ベンチマークETFの調整後終値（分配・分割調整後）
+  -- ベンチマークETFの調整後終値（J-Quants adj_close。分割調整後・通常の分配は未調整）
   etf_close            numeric(14,4),
   -- 加重バリュエーション（ウエートは当日 w_i(t)。分子分母とも算出可能な銘柄のみで再正規化）
   weighted_per         numeric(10,2),   -- 実績PER（時価総額合計 ÷ 純利益合計の調和的集計）

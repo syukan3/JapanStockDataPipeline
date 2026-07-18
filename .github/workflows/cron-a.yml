@@ -137,8 +137,9 @@ jobs:
 
       # テーマバスケット割安判定（analytics.basket_metrics）の日次集計。
       # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
-      # 構成銘柄の当日 market_cap/per/pbr/psr/dividend_yield を analytics.stock_metrics
-      # から読むため、refresh_stock_metrics（前段）成功をゲート条件にする
+      # 構成銘柄の当日バリュエーションは equity_bar_daily + financial_disclosure のPIT計算
+      # （バックフィルと同一パス）。refresh_stock_metrics 成功をゲート条件にするのは、
+      # その前提となる equity_bars/financial/rebase の成功を推移的に保証するため
       # （basket_definitions が未投入の間は0件検出で正常終了する）。
       - name: Refresh basket metrics (analytics.basket_metrics)
         if: always() && steps.refresh_stock_metrics.outcome == 'success'

@@ -289,6 +289,9 @@ export function waterFillCap(inputs: CapInput[]): Map<string, number> {
     const remaining = 1 - cappedSum;
     const uncappedShareSum = uncapped.reduce((s, i) => s + i.rawShare, 0);
     if (uncapped.length === 0 || uncappedShareSum <= 0) break;
+    // capLimit合計が1を超える異常設定でremainingが負になった場合は
+    // 負ウエートを配らずフォールバック正規化に落とす（防御的ガード）
+    if (remaining <= 0) break;
 
     const violations = uncapped.filter(
       (i) => (i.rawShare / uncappedShareSum) * remaining > i.capLimit + 1e-12
@@ -358,6 +361,9 @@ export function buildConstituentDay(
     officialWeight: input.officialWeight,
     mcap: close * shares,
     earnings: fy.eps != null ? fy.eps * fy.sharesOutstanding : null,
+    // NOTE: 赤字予想(forecastEps<=0)も意図的に分母へ含める（実績PERと同じ調和集計方針。
+    // 指数レベルのフォワードP/Eとしては合算純利益ベースが正であり、ISSUE-A.md の
+    // 「予想EPS<=0は除外」旧記述より本方式を正とする。集計側で分母<=0なら null になる）
     forwardEarnings: forward
       ? forward.forecastEps *
         cumulativeAdjustmentFactor(events, forward.disclosedDate, date) *
