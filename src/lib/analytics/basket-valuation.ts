@@ -318,6 +318,57 @@ export function waterFillCap(inputs: CapInput[]): Map<string, number> {
 // 日次集計（調和集計）
 // ============================================================
 
+/** buildConstituentDay の入力（価格・PIT財務・分割イベントの銘柄別素材） */
+export interface ConstituentDayInput {
+  code: string;
+  /** アンカー日に固定したウエート係数 */
+  factor: number;
+  /** アンカー日の公式（機械キャップ）ウエート%（カバレッジ算出用） */
+  officialWeight: number;
+  /** 生の終値（分割未調整）。欠損なら当日は構成から除外 */
+  close: number | null | undefined;
+  pit: PitFinancials;
+  events: SplitEvent[];
+}
+
+/**
+ * 1銘柄×1日の集計素材を構築する。価格または PIT の FY 実績（株式数）が無ければ null。
+ * seed（バックフィル）と cron（日次refresh）の両方がこの1点を通ることで定義の連続性を保証する。
+ *
+ * - mcap = 生close × PIT株数（(開示日, t] の分割累積積で t 基準へ換算）
+ * - earnings/book/dividendTotal は同一開示行の一株あたり値×株数（分割不変量のため補正不要）
+ * - forwardEarnings は予想EPSをその開示日から t 基準へ換算した上で PIT 株数と掛ける
+ */
+export function buildConstituentDay(
+  input: ConstituentDayInput,
+  date: string
+): ConstituentDay | null {
+  const { close, pit, events } = input;
+  if (close == null) return null;
+  const fy = pitFy(pit.fy, date);
+  if (!fy?.sharesOutstanding) return null;
+
+  const cum = cumulativeAdjustmentFactor(events, fy.disclosedDate, date);
+  const shares = fy.sharesOutstanding / cum;
+  const forward = pitForwardEps(pit, date);
+
+  return {
+    code: input.code,
+    factor: input.factor,
+    officialWeight: input.officialWeight,
+    mcap: close * shares,
+    earnings: fy.eps != null ? fy.eps * fy.sharesOutstanding : null,
+    forwardEarnings: forward
+      ? forward.forecastEps *
+        cumulativeAdjustmentFactor(events, forward.disclosedDate, date) *
+        shares
+      : null,
+    book: fy.bps != null ? fy.bps * fy.sharesOutstanding : null,
+    sales: fy.sales,
+    dividendTotal: fy.dividendAnnual != null ? fy.dividendAnnual * fy.sharesOutstanding : null,
+  };
+}
+
 /**
  * 分子（f×mcap）と分母（f×指標総額）を「両方算出可能な銘柄のみ」で組んで比を取る。
  * 分母が 0 以下（例: バスケット全体で赤字）の場合は null。

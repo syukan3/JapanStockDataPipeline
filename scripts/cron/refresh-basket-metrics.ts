@@ -3,17 +3,23 @@
  *
  * @description
  * analytics.basket_definitions の全バスケットについて、現行構成銘柄（basket_constituents,
- * valid_to is null）の当日 stock_metrics から当日ウエート・加重バリュエーション・
- * 模擬指数を計算し、analytics.basket_metrics へ upsert する（冪等）。
+ * valid_to is null）の当日集計を計算し、analytics.basket_metrics へ upsert する（冪等）。
  * 計画書: docs/PLANS-basket-valuation-2026-07.md §5/§6/§8
  *
- * - 計算パイプラインは src/lib/analytics/basket-metrics.ts の純関数群（テスト対象）。
+ * 計算はバックフィル（scripts/seed/basket-valuation.ts）と**同一の PIT 計算パス**
+ * （src/lib/analytics/basket-valuation.ts の buildConstituentDay → aggregateBasketDay →
+ * chainIndexSeries）を通す。加重バリュエーションを stock_metrics の per/pbr/psr 列から
+ * 集計すると赤字銘柄 PER=NULL 等の定義差でバックフィル系列と段差が生じるため、
+ * 価格は jquants_core.equity_bar_daily（生close/adj_close/adjustment_factor）、
+ * 財務は financial_disclosure の PIT 参照から直接計算する（stock_metrics 非依存）。
+ *
  * - バスケット定義が0件、または対象バスケットの現行構成銘柄が0件の場合はそのバスケットを
- *   スキップして正常終了する（Issue B の初回投入前でも失敗させない。他バスケットは継続）。
+ *   スキップして正常終了する（他バスケットは継続）。
+ * - 模擬指数は前営業日の basket_metrics 行がある場合のみ日次リターンで連結する。
+ *   前行が一度も存在せず対象日がアンカー日と一致する場合のみ anchor_index_level で初期化。
  * - job_runs / job_locks は使わない（upsert は冪等。refresh-technical.ts と同方針）。
- * - Cron A の stock_metrics 更新（refresh_stock_metrics RPC）後段の
- *   continue-on-error ステップとして実行する想定。equity_bars/equity_master/rebase
- *   成功をゲート条件にする（cron-a.yml 側。詳細は同ファイルのコメント参照）。
+ * - Cron A の equity_bars 同期後段の continue-on-error ステップとして実行する想定
+ *   （cron-a.yml 側。詳細は同ファイルのコメント参照）。
  *
  * 実行:
  *   npx tsx scripts/cron/refresh-basket-metrics.ts [--dry-run] [--date=YYYY-MM-DD]
@@ -22,20 +28,20 @@
 import { createAdminClient } from '../../src/lib/supabase/admin';
 import { createLogger } from '../../src/lib/utils/logger';
 import {
+  aggregateBasketDay,
+  buildConstituentDay,
+  chainIndexSeries,
+  type ConstituentDay,
+  type SplitEvent,
+  type PitFinancials,
+} from '../../src/lib/analytics/basket-valuation';
+import {
   toNumberOrNull,
   parseBasketConstituentRow,
-  parseStockMetricRow,
-  computeWeights,
-  weightedHarmonicMean,
-  weightedAverage,
-  selectEffectiveForecastEps,
-  computeIndexLevel,
-  computeWeightedEpsLevel,
+  fetchDisclosuresGrouped,
+  buildPitByCode,
   type BasketConstituent,
-  type StockMetricSnapshot,
-  type WeightedMetricEntry,
-  type IndexReturnEntry,
-} from '../../src/lib/analytics/basket-metrics';
+} from '../../src/lib/analytics/basket-valuation-data';
 
 // Supabaseクライアントはスキーマ束縛の動的型のため any で受ける（repo慣習。indicators-sync.ts 等と同方針）
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,10 +56,8 @@ interface BasketDefinition {
   anchor_index_level: number | null;
 }
 
-interface ForecastEpsRow {
-  forecast_eps: number | null;
-  next_forecast_eps: number | null;
-}
+/** local_code -> trade_date -> {close, adjClose} */
+type BarsByCode = Map<string, Map<string, { close: number | null; adjClose: number | null }>>;
 
 function validateEnv(): void {
   const required = ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
@@ -122,73 +126,105 @@ async function refreshBasket(
   }
   const codes = constituents.map((c) => c.local_code);
 
-  const targetDate = explicitDate ?? (await getLatestStockMetricsDate(analytics));
+  const targetDate = explicitDate ?? (await getLatestTradeDate(core));
   if (!targetDate) {
-    logger.warn('No stock_metrics data available; skipping basket', { basketId: basket.basket_id });
-    return { skipped: true, reason: 'no_stock_metrics' };
+    logger.warn('No equity_bar_daily data available; skipping basket', {
+      basketId: basket.basket_id,
+    });
+    return { skipped: true, reason: 'no_equity_bars' };
   }
 
-  const metricsMap = await getStockMetricsForDate(analytics, targetDate, codes);
-  const { weights, coveragePct } = computeWeights(constituents, metricsMap);
+  // PIT 財務（disclosed_date <= 対象日）と分割イベント（バックフィルと同一の計算素材）
+  const pitByCode = buildPitByCode(await fetchDisclosuresGrouped(core, codes, targetDate));
+  const splitEventsByCode = await fetchSplitEvents(core, codes, targetDate);
 
-  // 加重バリュエーション（実績PER/PBR/PSR = 調和集計、配当利回り = 単純加重平均）
-  const weightedPer = weightedHarmonicMean(
-    buildMetricEntries(constituents, metricsMap, (m) => m.per)
-  );
-  const weightedPbr = weightedHarmonicMean(
-    buildMetricEntries(constituents, metricsMap, (m) => m.pbr)
-  );
-  const weightedPsr = weightedHarmonicMean(
-    buildMetricEntries(constituents, metricsMap, (m) => m.psr)
-  );
-  const weightedDivYield = weightedAverage(
-    buildMetricEntries(constituents, metricsMap, (m) => m.dividend_yield)
-  );
+  // 前行（模擬指数チェーンの起点）を先に引き、必要な2日分の日足をまとめて取得
+  const prevRow = await getPreviousBasketMetricsRow(analytics, basket.basket_id, targetDate);
+  const barDates = prevRow ? [prevRow.as_of_date, targetDate] : [targetDate];
+  const barsByCode = await getBarsForDates(core, codes, barDates);
 
-  // フォワードPER（会社予想EPSベース。FY開示のforecast_eps欠損はnext_forecast_epsへフォールバック）
-  const disclosuresByCode = await getLatestForecastEps(core, codes, targetDate);
-  const forwardPerEntries: WeightedMetricEntry[] = constituents.map((c) => {
-    const metric = metricsMap.get(c.local_code);
-    const forecastEps = selectEffectiveForecastEps(disclosuresByCode.get(c.local_code));
-    const forwardPer =
-      metric?.close != null && forecastEps != null && forecastEps > 0
-        ? metric.close / forecastEps
-        : null;
-    return {
-      localCode: c.local_code,
-      weightFactor: c.weight_factor,
-      marketCap: metric?.market_cap ?? null,
-      value: forwardPer,
-    };
-  });
-  const weightedPerForward = weightedHarmonicMean(forwardPerEntries);
+  const buildItems = (date: string): ConstituentDay[] => {
+    const items: ConstituentDay[] = [];
+    for (const c of constituents) {
+      const item = buildConstituentDay(
+        {
+          code: c.local_code,
+          factor: c.weight_factor,
+          officialWeight: c.official_weight ?? 0,
+          close: barsByCode.get(c.local_code)?.get(date)?.close,
+          pit: pitByCode.get(c.local_code) ?? emptyPit(),
+          events: splitEventsByCode.get(c.local_code) ?? [],
+        },
+        date
+      );
+      if (item) items.push(item);
+    }
+    return items;
+  };
 
-  // 模擬指数の連結（前営業日の basket_metrics 行がある場合のみ）
-  const indexLevel = await computeIndexLevelForDate(
-    core,
-    analytics,
-    basket,
-    constituents,
-    targetDate
-  );
-  const weightedEpsLevel = computeWeightedEpsLevel(indexLevel, weightedPer);
+  const currItems = buildItems(targetDate);
+  if (currItems.length === 0) {
+    logger.warn('No constituent has price+PIT data for target date; skipping basket', {
+      basketId: basket.basket_id,
+      targetDate,
+    });
+    return { skipped: true, reason: 'no_constituent_data', targetDate };
+  }
+  const agg = aggregateBasketDay(currItems);
+
+  // 模擬指数の連結（バックフィルと同じ chainIndexSeries を前行→対象日の2日系列で適用）
+  let indexLevel: number | null = null;
+  if (!prevRow) {
+    if (basket.anchor_date === targetDate && basket.anchor_index_level != null) {
+      indexLevel = basket.anchor_index_level;
+    }
+  } else if (prevRow.index_level != null) {
+    const prevAgg = aggregateBasketDay(buildItems(prevRow.as_of_date));
+    const adjCloseByCode = new Map<string, Map<string, number>>();
+    for (const [code, dates] of barsByCode) {
+      const adjMap = new Map<string, number>();
+      for (const [date, bar] of dates) {
+        if (bar.adjClose != null) adjMap.set(date, bar.adjClose);
+      }
+      adjCloseByCode.set(code, adjMap);
+    }
+    const levels = chainIndexSeries(
+      [prevRow.as_of_date, targetDate],
+      new Map([[prevRow.as_of_date, prevAgg.weights]]),
+      adjCloseByCode,
+      prevRow.as_of_date,
+      prevRow.index_level
+    );
+    indexLevel = levels.get(targetDate) ?? null;
+  }
 
   const etfClose = basket.benchmark_code
-    ? await getEquityCloseForDate(core, basket.benchmark_code, targetDate)
+    ? (barsByCode.get(basket.benchmark_code) ??
+        (await getBarsForDates(core, [basket.benchmark_code], [targetDate])).get(
+          basket.benchmark_code
+        ))?.get(targetDate)?.adjClose ?? null
     : null;
+
+  // 丸め桁はバックフィル（seed/basket-valuation.ts）と揃える
+  const round = (v: number | null | undefined, dp: number): number | null =>
+    v == null ? null : Number(v.toFixed(dp));
+  const epsLevel =
+    indexLevel != null && agg.weightedPer != null && agg.weightedPer > 0
+      ? indexLevel / agg.weightedPer
+      : null;
 
   const row = {
     basket_id: basket.basket_id,
     as_of_date: targetDate,
-    index_level: indexLevel,
-    etf_close: etfClose,
-    weighted_per: weightedPer,
-    weighted_per_forward: weightedPerForward,
-    weighted_pbr: weightedPbr,
-    weighted_psr: weightedPsr,
-    weighted_div_yield: weightedDivYield,
-    weighted_eps_level: weightedEpsLevel,
-    coverage_pct: Math.round(coveragePct * 10) / 10,
+    index_level: round(indexLevel, 4),
+    etf_close: round(etfClose, 4),
+    weighted_per: round(agg.weightedPer, 2),
+    weighted_per_forward: round(agg.weightedPerForward, 2),
+    weighted_pbr: round(agg.weightedPbr, 2),
+    weighted_psr: round(agg.weightedPsr, 2),
+    weighted_div_yield: round(agg.weightedDivYield, 3),
+    weighted_eps_level: round(epsLevel, 4),
+    coverage_pct: round(agg.coveragePct, 1),
     updated_at: new Date().toISOString(),
   };
 
@@ -198,7 +234,7 @@ async function refreshBasket(
       dryRun: true,
       targetDate,
       constituents: constituents.length,
-      coveredWeights: weights.size,
+      coveredConstituents: currItems.length,
       row,
     };
   }
@@ -213,75 +249,14 @@ async function refreshBasket(
   return {
     targetDate,
     constituents: constituents.length,
-    coveredWeights: weights.size,
+    coveredConstituents: currItems.length,
     coveragePct: row.coverage_pct,
     upserted: true,
   };
 }
 
-/** 構成銘柄 + 当日メトリクスから、指定フィールドの WeightedMetricEntry[] を組み立てる */
-function buildMetricEntries(
-  constituents: BasketConstituent[],
-  metricsMap: Map<string, StockMetricSnapshot>,
-  selector: (m: StockMetricSnapshot) => number | null
-): WeightedMetricEntry[] {
-  return constituents.map((c) => {
-    const metric = metricsMap.get(c.local_code);
-    return {
-      localCode: c.local_code,
-      weightFactor: c.weight_factor,
-      marketCap: metric?.market_cap ?? null,
-      value: metric ? selector(metric) : null,
-    };
-  });
-}
-
-/**
- * 模擬指数（index_level）を対象日について計算する。
- *
- * - 前営業日の basket_metrics 行が無ければ null（バックフィルが過去分を埋める想定）。
- *   ただし前行が一度も存在せず、対象日がアンカー日と一致する場合のみ
- *   anchor_index_level を初期値として採用する。
- * - 前行はあるが index_level が未確定（null）の場合もチェーンできないため null のまま。
- */
-async function computeIndexLevelForDate(
-  core: Client,
-  analytics: Client,
-  basket: BasketDefinition,
-  constituents: BasketConstituent[],
-  targetDate: string
-): Promise<number | null> {
-  const codes = constituents.map((c) => c.local_code);
-  const prevRow = await getPreviousBasketMetricsRow(analytics, basket.basket_id, targetDate);
-
-  if (!prevRow) {
-    if (basket.anchor_date === targetDate && basket.anchor_index_level != null) {
-      return basket.anchor_index_level;
-    }
-    return null;
-  }
-  if (prevRow.index_level == null) {
-    return null;
-  }
-
-  const prevMetricsMap = await getStockMetricsForDate(analytics, prevRow.as_of_date, codes);
-  const closesByCode = await getEquityBarClosesForDates(core, codes, [
-    prevRow.as_of_date,
-    targetDate,
-  ]);
-
-  const entries: IndexReturnEntry[] = constituents.map((c) => {
-    const dates = closesByCode.get(c.local_code);
-    return {
-      localCode: c.local_code,
-      weightFactor: c.weight_factor,
-      prevMarketCap: prevMetricsMap.get(c.local_code)?.market_cap ?? null,
-      prevClose: dates?.get(prevRow.as_of_date) ?? null,
-      currClose: dates?.get(targetDate) ?? null,
-    };
-  });
-
-  return computeIndexLevel(prevRow.index_level, entries).indexLevel;
+function emptyPit(): PitFinancials {
+  return { fy: [], forward: [] };
 }
 
 // ============================================================
@@ -338,43 +313,17 @@ async function listCurrentConstituents(
   return rows;
 }
 
-/** stock_metrics の最新 as_of_date（--date 未指定時のフォールバック） */
-async function getLatestStockMetricsDate(analytics: Client): Promise<string | null> {
-  const { data, error } = await analytics
-    .from('stock_metrics')
-    .select('as_of_date')
-    .order('as_of_date', { ascending: false })
+/** equity_bar_daily の最新 trade_date（--date 未指定時のフォールバック） */
+async function getLatestTradeDate(core: Client): Promise<string | null> {
+  const { data, error } = await core
+    .from('equity_bar_daily')
+    .select('trade_date')
+    .eq('session', 'DAY')
+    .order('trade_date', { ascending: false })
     .limit(1);
-  if (error) throw new Error(`Failed to get latest stock_metrics date: ${error.message}`);
-  const rows = (data as { as_of_date: string }[] | null) ?? [];
-  return rows[0]?.as_of_date ?? null;
-}
-
-async function getStockMetricsForDate(
-  analytics: Client,
-  date: string,
-  codes: string[]
-): Promise<Map<string, StockMetricSnapshot>> {
-  const map = new Map<string, StockMetricSnapshot>();
-  if (codes.length === 0) return map;
-  const { data, error } = await analytics
-    .from('stock_metrics')
-    .select('local_code, market_cap, per, pbr, psr, dividend_yield, close')
-    .eq('as_of_date', date)
-    .in('local_code', codes);
-  if (error) throw new Error(`Failed to load stock_metrics for ${date}: ${error.message}`);
-  const rows =
-    (data as Array<{
-      local_code: string;
-      market_cap: unknown;
-      per: unknown;
-      pbr: unknown;
-      psr: unknown;
-      dividend_yield: unknown;
-      close: unknown;
-    }> | null) ?? [];
-  for (const r of rows) map.set(r.local_code, parseStockMetricRow(r));
-  return map;
+  if (error) throw new Error(`Failed to get latest trade date: ${error.message}`);
+  const rows = (data as { trade_date: string }[] | null) ?? [];
+  return rows[0]?.trade_date ?? null;
 }
 
 /** 対象日より前の直近 basket_metrics 行（模擬指数チェーンの起点） */
@@ -398,90 +347,78 @@ async function getPreviousBasketMetricsRow(
   return { as_of_date: rows[0].as_of_date, index_level: toNumberOrNull(rows[0].index_level) };
 }
 
-/** codes × dates（通常2件: 前営業日/対象日）の adj_close を local_code -> date -> value で返す */
-async function getEquityBarClosesForDates(
+/** codes × dates（通常2件: 前営業日/対象日）の 生close/adj_close を取得する */
+async function getBarsForDates(
   core: Client,
   codes: string[],
   dates: string[]
-): Promise<Map<string, Map<string, number | null>>> {
-  const result = new Map<string, Map<string, number | null>>();
+): Promise<BarsByCode> {
+  const result: BarsByCode = new Map();
   if (codes.length === 0 || dates.length === 0) return result;
   const { data, error } = await core
     .from('equity_bar_daily')
-    .select('local_code, trade_date, adj_close')
+    .select('local_code, trade_date, close, adj_close')
     .in('local_code', codes)
     .in('trade_date', dates)
     .eq('session', 'DAY');
   if (error) throw new Error(`Failed to load equity_bar_daily: ${error.message}`);
   const rows =
-    (data as Array<{ local_code: string; trade_date: string; adj_close: unknown }> | null) ?? [];
+    (data as Array<{
+      local_code: string;
+      trade_date: string;
+      close: unknown;
+      adj_close: unknown;
+    }> | null) ?? [];
   for (const r of rows) {
     if (!result.has(r.local_code)) result.set(r.local_code, new Map());
-    result.get(r.local_code)!.set(r.trade_date, toNumberOrNull(r.adj_close));
+    result.get(r.local_code)!.set(r.trade_date, {
+      close: toNumberOrNull(r.close),
+      adjClose: toNumberOrNull(r.adj_close),
+    });
   }
   return result;
 }
 
-async function getEquityCloseForDate(
-  core: Client,
-  code: string,
-  date: string
-): Promise<number | null> {
-  const { data, error } = await core
-    .from('equity_bar_daily')
-    .select('adj_close')
-    .eq('local_code', code)
-    .eq('trade_date', date)
-    .eq('session', 'DAY')
-    .limit(1);
-  if (error) throw new Error(`Failed to load equity_bar_daily for ${code}: ${error.message}`);
-  const rows = (data as Array<{ adj_close: unknown }> | null) ?? [];
-  return rows.length > 0 ? toNumberOrNull(rows[0].adj_close) : null;
-}
-
 /**
- * 対象日以前の最新開示（disclosed_date<=対象日）の予想EPSを銘柄ごとに取得する。
+ * 構成銘柄の分割・併合イベント（adjustment_factor <> 1）を取得する。
  *
- * NOTE: バスケット構成銘柄数（数十件）前提で全件フェッチしJS側で銘柄ごとの最新行を選ぶ
- * （PostgRESTはDISTINCT ONを直接サポートしないため）。local_code昇順→disclosed_date降順で
- * ソートされるため、各local_codeで最初に出現する行がその銘柄の最新開示になる。
+ * NOTE: equity_bar_daily はアーカイブ安全弁でローリング保持（現状 2025-04-21〜）のため、
+ * それ以前のイベントは拾えない。PIT の FY 開示は年次で更新され、必要な補正窓は
+ * 「最新開示日〜対象日」（高々1年強）なので実用上はアーカイブ窓に収まる。
  */
-async function getLatestForecastEps(
+async function fetchSplitEvents(
   core: Client,
   codes: string[],
-  asOfDate: string
-): Promise<Map<string, ForecastEpsRow>> {
-  const map = new Map<string, ForecastEpsRow>();
-  if (codes.length === 0) return map;
-  const PAGE = 1000;
-  for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await core
-      .from('financial_disclosure')
-      .select('local_code, disclosed_date, forecast_eps, next_forecast_eps')
-      .in('local_code', codes)
-      .lte('disclosed_date', asOfDate)
-      .order('local_code', { ascending: true })
-      .order('disclosed_date', { ascending: false })
-      .range(offset, offset + PAGE - 1);
-    if (error) throw new Error(`Failed to load financial_disclosure: ${error.message}`);
-    const rows =
-      (data as Array<{
-        local_code: string;
-        disclosed_date: string;
-        forecast_eps: unknown;
-        next_forecast_eps: unknown;
-      }> | null) ?? [];
-    for (const r of rows) {
-      if (!map.has(r.local_code)) {
-        map.set(r.local_code, {
-          forecast_eps: toNumberOrNull(r.forecast_eps),
-          next_forecast_eps: toNumberOrNull(r.next_forecast_eps),
-        });
-      }
-    }
-    if (rows.length < PAGE) break;
+  toDate: string
+): Promise<Map<string, SplitEvent[]>> {
+  const result = new Map<string, SplitEvent[]>();
+  if (codes.length === 0) return result;
+  const { data, error } = await core
+    .from('equity_bar_daily')
+    .select('local_code, trade_date, adjustment_factor')
+    .in('local_code', codes)
+    .lte('trade_date', toDate)
+    .eq('session', 'DAY')
+    .not('adjustment_factor', 'is', null)
+    .neq('adjustment_factor', 1)
+    .order('trade_date', { ascending: true });
+  if (error) throw new Error(`Failed to load split events: ${error.message}`);
+  const rows =
+    (data as Array<{
+      local_code: string;
+      trade_date: string;
+      adjustment_factor: unknown;
+    }> | null) ?? [];
+  for (const r of rows) {
+    const factor = toNumberOrNull(r.adjustment_factor);
+    if (factor == null || factor <= 0 || factor === 1) continue;
+    if (!result.has(r.local_code)) result.set(r.local_code, []);
+    const events = result.get(r.local_code)!;
+    // 同一 trade_date の重複 session 行があっても二重掛けしない
+    if (events.some((e) => e.date === r.trade_date)) continue;
+    events.push({ date: r.trade_date, factor });
   }
-  return map;
+  return result;
 }
 
 main()

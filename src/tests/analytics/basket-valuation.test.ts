@@ -13,6 +13,7 @@ import {
   pitFy,
   pitForwardEps,
   waterFillCap,
+  buildConstituentDay,
   aggregateBasketDay,
   chainIndexSeries,
   pearsonCorrelation,
@@ -20,6 +21,7 @@ import {
   type SlimBar,
   type RawDisclosure,
   type ConstituentDay,
+  type PitFinancials,
 } from '@/lib/analytics/basket-valuation';
 
 // ============================================================
@@ -271,6 +273,76 @@ describe('waterFillCap', () => {
   it('空入力は空Map、シェア合計0はエラー', () => {
     expect(waterFillCap([]).size).toBe(0);
     expect(() => waterFillCap([{ code: 'A', rawShare: 0, capLimit: 0.15 }])).toThrow();
+  });
+});
+
+// ============================================================
+// 1銘柄×1日の集計素材（seed / cron 共有パス）
+// ============================================================
+
+describe('buildConstituentDay', () => {
+  const basePit = (): PitFinancials => ({
+    fy: [
+      {
+        disclosedDate: '2026-04-30',
+        disclosedTime: '15:00',
+        fiscalYearEnd: '2026-03-31',
+        sales: 1000,
+        netIncome: 90,
+        eps: 100,
+        bps: 400,
+        dividendAnnual: 50,
+        sharesOutstanding: 10,
+      },
+    ],
+    forward: [
+      {
+        disclosedDate: '2026-04-30',
+        disclosedTime: '15:00',
+        targetFyEnd: '2027-03-31',
+        forecastEps: 120,
+      },
+    ],
+  });
+  const input = (over: Partial<Parameters<typeof buildConstituentDay>[0]> = {}) => ({
+    code: 'X',
+    factor: 2,
+    officialWeight: 15,
+    close: 2000,
+    pit: basePit(),
+    events: [],
+    ...over,
+  });
+
+  it('価格またはPIT株数が無ければ null', () => {
+    expect(buildConstituentDay(input({ close: null }), '2026-07-17')).toBeNull();
+    expect(
+      buildConstituentDay(input({ pit: { fy: [], forward: [] } }), '2026-07-17')
+    ).toBeNull();
+  });
+
+  it('通常時: mcap=close×株数、earnings/book/dividendTotal は開示不変量', () => {
+    const item = buildConstituentDay(input(), '2026-07-17')!;
+    expect(item.mcap).toBeCloseTo(2000 * 10);
+    expect(item.earnings).toBeCloseTo(100 * 10);
+    expect(item.forwardEarnings).toBeCloseTo(120 * 10);
+    expect(item.book).toBeCloseTo(400 * 10);
+    expect(item.sales).toBe(1000);
+    expect(item.dividendTotal).toBeCloseTo(50 * 10);
+    expect(item.factor).toBe(2);
+    expect(item.officialWeight).toBe(15);
+  });
+
+  it('開示後の分割: 株数は÷factorで増え、earnings等の総額は不変', () => {
+    // 1→5 分割（factor 0.2）が開示後に発生。分割後の close=400 で時価総額は不変
+    const item = buildConstituentDay(
+      input({ close: 400, events: [{ date: '2026-06-29', factor: 0.2 }] }),
+      '2026-07-17'
+    )!;
+    expect(item.mcap).toBeCloseTo(400 * (10 / 0.2)); // = 2000×10 と同じ
+    expect(item.earnings).toBeCloseTo(1000); // 不変量
+    // 予想EPSも開示日基準→t基準へ換算されるため予想純利益も不変
+    expect(item.forwardEarnings).toBeCloseTo(120 * 0.2 * (10 / 0.2));
   });
 });
 

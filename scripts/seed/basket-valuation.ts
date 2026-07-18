@@ -29,21 +29,22 @@ import { loadEnv, createProgress, logResult, startTimer, type SeedResult } from 
 import {
   extractSplitEvents,
   cumulativeAdjustmentFactor,
-  buildPitFinancials,
   pitFy,
-  pitForwardEps,
   waterFillCap,
+  buildConstituentDay,
   aggregateBasketDay,
   chainIndexSeries,
   pearsonCorrelation,
   annualizedTrackingError,
   type SlimBar,
   type SplitEvent,
-  type RawDisclosure,
-  type PitFinancials,
   type ConstituentDay,
   type BasketDayAggregate,
 } from '../../src/lib/analytics/basket-valuation';
+import {
+  fetchDisclosuresGrouped,
+  buildPitByCode,
+} from '../../src/lib/analytics/basket-valuation-data';
 import { getJSTDate, addDays } from '../../src/lib/utils/date';
 
 // ============================================================
@@ -215,23 +216,6 @@ async function loadPricesWithCache(
   return bars;
 }
 
-/** PostgREST の numeric が文字列で返る環境差を吸収 */
-function toNumericDisclosure(row: RawDisclosure): RawDisclosure {
-  const num = (v: unknown): number | null =>
-    v == null ? null : typeof v === 'number' ? v : Number(v);
-  return {
-    ...row,
-    sales: num(row.sales),
-    net_income: num(row.net_income),
-    eps: num(row.eps),
-    bps: num(row.bps),
-    dividend_annual: num(row.dividend_annual),
-    forecast_eps: num(row.forecast_eps),
-    next_forecast_eps: num(row.next_forecast_eps),
-    shares_outstanding_fy: num(row.shares_outstanding_fy),
-  };
-}
-
 // ============================================================
 // main
 // ============================================================
@@ -306,36 +290,8 @@ async function main(): Promise<SeedResult> {
   // ---------- Step 2: PIT 財務系列（financial_disclosure を読み取りのみ） ----------
   const core = createAdminClient('jquants_core');
   const constituentCodes = CONSTITUENTS.map((c) => c.code);
-  const disclosuresByCode = new Map<string, RawDisclosure[]>();
-  for (const code of constituentCodes) disclosuresByCode.set(code, []);
-
-  const PAGE_SIZE = 1000;
-  for (let page = 0; ; page++) {
-    const { data, error } = await core
-      .from('financial_disclosure')
-      .select(
-        'local_code, disclosed_date, disclosed_time, period_type, sales, net_income, eps, bps, ' +
-          'dividend_annual, forecast_eps, next_forecast_eps, shares_outstanding_fy, fiscal_year_end'
-      )
-      .in('local_code', constituentCodes)
-      .order('disclosed_date', { ascending: true })
-      .order('disclosed_time', { ascending: true })
-      .order('disclosure_id', { ascending: true })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (error) throw new Error(`financial_disclosure fetch failed: ${error.message}`);
-    for (const row of data ?? []) {
-      const { local_code: localCode, ...rest } = row as unknown as RawDisclosure & {
-        local_code: string;
-      };
-      disclosuresByCode.get(localCode)?.push(toNumericDisclosure(rest));
-    }
-    if (!data || data.length < PAGE_SIZE) break;
-  }
-
-  const pitByCode = new Map<string, PitFinancials>();
-  for (const code of constituentCodes) {
-    pitByCode.set(code, buildPitFinancials(disclosuresByCode.get(code) ?? []));
-  }
+  const disclosuresByCode = await fetchDisclosuresGrouped(core, constituentCodes);
+  const pitByCode = buildPitByCode(disclosuresByCode);
   console.log(
     `Disclosures loaded: ${[...disclosuresByCode.values()].reduce((s, r) => s + r.length, 0)} rows`
   );
@@ -410,41 +366,33 @@ async function main(): Promise<SeedResult> {
   for (const date of dates) {
     const items: ConstituentDay[] = [];
     for (const code of constituentCodes) {
-      const close = closeByCode.get(code)?.get(date);
-      if (close == null) continue;
-      const pit = pitByCode.get(code)!;
-      const fy = pitFy(pit.fy, date);
-      if (!fy?.sharesOutstanding) continue;
-
-      const events = splitEventsByCode.get(code) ?? [];
-      const cum = cumulativeAdjustmentFactor(events, fy.disclosedDate, date);
-      const shares = fy.sharesOutstanding / cum;
-      const forward = pitForwardEps(pit, date);
-
-      items.push({
-        code,
-        factor: weightFactorByCode.get(code)!,
-        officialWeight: officialWeightByCode.get(code)!,
-        mcap: close * shares,
-        // eps×株数 等の積は同一開示行由来のため分割補正不要の不変量
-        earnings: fy.eps != null ? fy.eps * fy.sharesOutstanding : null,
-        forwardEarnings: forward
-          ? forward.forecastEps *
-            cumulativeAdjustmentFactor(events, forward.disclosedDate, date) *
-            shares
-          : null,
-        book: fy.bps != null ? fy.bps * fy.sharesOutstanding : null,
-        sales: fy.sales,
-        dividendTotal: fy.dividendAnnual != null ? fy.dividendAnnual * fy.sharesOutstanding : null,
-      });
-
-      if (date === lastDate && fy.eps != null && fy.eps !== 0) {
-        perStockPer.set(code, close / (fy.eps * cum));
-      }
+      const item = buildConstituentDay(
+        {
+          code,
+          factor: weightFactorByCode.get(code)!,
+          officialWeight: officialWeightByCode.get(code)!,
+          close: closeByCode.get(code)?.get(date),
+          pit: pitByCode.get(code)!,
+          events: splitEventsByCode.get(code) ?? [],
+        },
+        date
+      );
+      if (item) items.push(item);
     }
     const agg = aggregateBasketDay(items);
     aggByDate.set(date, agg);
     weightsByDate.set(date, agg.weights);
+  }
+
+  // 検証用: 最終日の個別PER（close / (eps × 分割累積係数)）
+  for (const code of constituentCodes) {
+    const close = closeByCode.get(code)?.get(lastDate);
+    const fy = pitFy(pitByCode.get(code)!.fy, lastDate);
+    if (close == null || fy?.eps == null || fy.eps === 0) continue;
+    const cum = cumulativeAdjustmentFactor(
+      splitEventsByCode.get(code) ?? [], fy.disclosedDate, lastDate
+    );
+    perStockPer.set(code, close / (fy.eps * cum));
   }
 
   const constituentAdjCloses = new Map<string, Map<string, number>>();
