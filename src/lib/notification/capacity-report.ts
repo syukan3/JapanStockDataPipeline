@@ -14,11 +14,18 @@ import { escapeHtml } from '../utils/html';
  */
 export const FREE_PLAN_DB_LIMIT_MB = 500;
 
-/** この使用率(%)以上で件名に警告プレフィックスを付与 */
-export const CAPACITY_WARNING_THRESHOLD_PCT = 80;
+/**
+ * この使用率(%)以上で件名に警告プレフィックスを付与
+ *
+ * NOTE: 2026-07-18のヒストリカル補充（財務7.5年・投資部門別10年ほか）以降、
+ * 定常状態は「株価300営業日床・DB 435〜450MB（87〜90%）循環」の均衡になった。
+ * アーカイブ閾値450MB(90%)以下は設計どおりの正常運転のため警告しない。
+ * 92%(460MB)超 = アーカイブで削れなくなった（株価が床に達した）真の危険シグナル。
+ */
+export const CAPACITY_WARNING_THRESHOLD_PCT = 92;
 
-/** この使用率(%)以上で件名に危険プレフィックスを付与 */
-export const CAPACITY_CRITICAL_THRESHOLD_PCT = 90;
+/** この使用率(%)以上で件名に危険プレフィックスを付与（500MBハード上限接近・即対応） */
+export const CAPACITY_CRITICAL_THRESHOLD_PCT = 96;
 
 export interface CapacityTopTable {
   schemaName: string;

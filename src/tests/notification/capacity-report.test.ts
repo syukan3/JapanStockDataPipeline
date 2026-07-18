@@ -26,40 +26,40 @@ function baseInput(overrides: Partial<CapacityReportInput> = {}): CapacityReport
 }
 
 describe('notification/capacity-report.ts', () => {
-  it('定数: Free プラン上限は500MB、警告80%/危険90%', () => {
+  it('定数: Free プラン上限は500MB、警告92%/危険96%（450MB以下の定常循環では警告しない）', () => {
     expect(FREE_PLAN_DB_LIMIT_MB).toBe(500);
-    expect(CAPACITY_WARNING_THRESHOLD_PCT).toBe(80);
-    expect(CAPACITY_CRITICAL_THRESHOLD_PCT).toBe(90);
+    expect(CAPACITY_WARNING_THRESHOLD_PCT).toBe(92);
+    expect(CAPACITY_CRITICAL_THRESHOLD_PCT).toBe(96);
   });
 
   describe('件名の閾値プレフィックス（境界値）', () => {
-    it('79.9%（80%未満）はプレフィックスなし', () => {
-      const { subject } = buildCapacityReport(baseInput({ dbSizeMb: 399.5 }));
+    it('91.9%（92%未満・定常循環の上限450MB含む）はプレフィックスなし', () => {
+      const { subject } = buildCapacityReport(baseInput({ dbSizeMb: 459.5 }));
 
       expect(subject).not.toContain('⚠️');
       expect(subject).not.toContain('🚨');
       expect(subject.startsWith('[DB容量]')).toBe(true);
     });
 
-    it('80%ちょうどは⚠️プレフィックス', () => {
-      const { subject, usagePct } = buildCapacityReport(baseInput({ dbSizeMb: 400 }));
+    it('92%ちょうどは⚠️プレフィックス', () => {
+      const { subject, usagePct } = buildCapacityReport(baseInput({ dbSizeMb: 460 }));
 
-      expect(usagePct).toBe(80);
+      expect(usagePct).toBe(92);
       expect(subject).toContain('⚠️');
       expect(subject).not.toContain('🚨');
     });
 
-    it('89.9%（90%未満）は⚠️のまま（🚨にならない）', () => {
-      const { subject } = buildCapacityReport(baseInput({ dbSizeMb: 449.5 }));
+    it('95.9%（96%未満）は⚠️のまま（🚨にならない）', () => {
+      const { subject } = buildCapacityReport(baseInput({ dbSizeMb: 479.5 }));
 
       expect(subject).toContain('⚠️');
       expect(subject).not.toContain('🚨');
     });
 
-    it('90%ちょうどは🚨プレフィックス（⚠️は含まない）', () => {
-      const { subject, usagePct } = buildCapacityReport(baseInput({ dbSizeMb: 450 }));
+    it('96%ちょうどは🚨プレフィックス（⚠️は含まない）', () => {
+      const { subject, usagePct } = buildCapacityReport(baseInput({ dbSizeMb: 480 }));
 
-      expect(usagePct).toBe(90);
+      expect(usagePct).toBe(96);
       expect(subject).toContain('🚨');
       expect(subject).not.toContain('⚠️');
     });
