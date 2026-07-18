@@ -1,10 +1,9 @@
 name: Cron F - Weekly Margin Interest Sync
 run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
 on:
-  # J-Quants Standard 契約後に有効化する（契約後Runbook参照）。
-  # 未契約のまま定期実行すると 401/403 で毎週失敗メールが飛ぶためコメントアウトで用意。
-  # schedule:
-  #   - cron: '30 20 * * 2'  # JST 水曜 05:30（週次、前週末の残高公表後）
+  # GitHub schedule はフォールバック（主経路は pg_cron 外部トリガー dispatch-cron-f）
+  schedule:
+    - cron: '30 20 * * 2'  # JST 水曜 05:30（週次、前週末の残高公表後）
   workflow_dispatch:
     inputs:
       dispatch_label:

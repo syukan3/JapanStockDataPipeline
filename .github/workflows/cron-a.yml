@@ -154,6 +154,9 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 空売り比率はJ-Quants公式データ(short_selling_sector)から算出（2026-07切替）
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          SHORT_RATIO_SOURCE: jquants
         run: npx tsx scripts/cron/refresh-market-indicators.ts --skip-breadth
 
       - name: Notify on failure
