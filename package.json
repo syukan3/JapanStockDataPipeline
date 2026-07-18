@@ -25,6 +25,7 @@
     "seed:market": "tsx scripts/seed/market-indicators.ts",
     "seed:short-ratio": "tsx scripts/seed/short-ratio.ts",
     "cron:market": "tsx scripts/cron/refresh-market-indicators.ts",
+    "seed:basket": "tsx scripts/seed/basket-valuation.ts",
     "cron:rebase": "tsx scripts/cron/rebase-adjusted-bars.ts"
   },
   "dependencies": {

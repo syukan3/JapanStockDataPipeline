@@ -69,6 +69,9 @@ export default defineConfig({
         'src/lib/market/nikkei225jp-client.ts',
         'src/lib/market/seed-validation.ts',
         'src/lib/analytics/market-breadth.ts',
+        // basket valuation
+        'src/lib/analytics/basket-valuation.ts',
+        'src/lib/analytics/basket-valuation-data.ts',
       ],
       thresholds: {
         statements: 80,
