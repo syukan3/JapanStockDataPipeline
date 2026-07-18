@@ -11,7 +11,8 @@
  *     （通常15% / 非半導体主業5%）で水充填。アンカー日は直近定期見直し日。
  *   - sector33_auto（銀行業/1615）: equity_master(is_current=true) の sector33_name 一致から
  *     構成銘柄を自動導出。キャップ無し＝時価総額シェアそのものがウエート（weight_factor=1）。
- *     公式指数の実在値が無いため、模擬指数はバックフィル系列の最初の営業日を基準（=1000）とする。
+ *     公式指数は存在しないが、NAV軸（ETF実勢価格 vs 模擬指数）が同一スケールで意味を持つよう、
+ *     curatedと同じくベンチマークETFの実勢価格をアンカー値に使う（合成基準値は使わない）。
  *
  * 書き込み先は analytics.basket_definitions / basket_constituents / basket_metrics の
  * 3テーブルのみ（冪等 upsert。再実行可）。
@@ -92,8 +93,6 @@ interface BasketSeedConfig {
    * 実行時にアンカーとして採用する）。
    */
   anchorDate?: string;
-  /** sector33_auto の模擬指数基準値（キリの良い1000）。curated は benchmark adj_close を使うため無視 */
-  syntheticBaseLevel?: number;
   /** 検証レポートの個別PER突合対象（200A=80350/TEL）。無ければ突合をスキップ */
   spotCheckCode?: string;
   source: SourceDef;
@@ -158,9 +157,9 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
     benchmarkCode: '16150',
     description:
       'TOPIX-33業種「銀行業」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
-      'キャップ無し）。模擬指数はバックフィル系列の最初の営業日を1000として基準化。',
+      'キャップ無し）。模擬指数は構成銘柄データが揃う最初の営業日にベンチマークETF(1615)の' +
+      '実勢価格を基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
-    syntheticBaseLevel: 1000,
     source: { kind: 'sector33_auto', sector33Filter: '銀行業' },
   },
 };
@@ -568,9 +567,12 @@ async function seedOneBasket(
   }
 
   // ---------- Step 5b: 模擬指数のアンカーを確定 ----------
-  // curated は固定アンカー日 + ベンチマークETF実値。sector33_auto は公式指数の実在値が無いため、
-  // 構成銘柄データ（価格+PIT）が揃う最初の営業日を基準（=syntheticBaseLevel）とする。
-  // 先頭の財務未開示期間はカバレッジ0で除外されるため、そこをアンカーにすると連結が始点で断絶する。
+  // curated は固定アンカー日 + ベンチマークETF実値。sector33_auto は公式指数が存在しないが、
+  // NAV軸（ETF実勢価格 vs 模擬指数の直接比較）が同一スケールで意味を持つよう、
+  // curatedと同じく**ベンチマークETFのadj_close**をアンカー値に使う（合成値1000は使わない。
+  // index_levelとetf_closeが別スケールだとcomputeNavAxisの乖離%が構造的に無意味になるため）。
+  // アンカー日は構成銘柄データ（価格+PIT）が揃う最初の営業日（先頭の財務未開示期間はカバレッジ0で
+  // 除外されるため、そこをアンカーにすると連結が始点で断絶する）。
   let anchorDate: string;
   let anchorIndexLevel: number;
   if (source.kind === 'curated') {
@@ -581,8 +583,14 @@ async function seedOneBasket(
     if (!firstWithData) {
       throw new Error(`No date with constituent price+PIT data for ${config.basketId}`);
     }
+    const benchmarkLevel = adjCloseByCode.get(config.benchmarkCode)?.get(firstWithData);
+    if (benchmarkLevel == null) {
+      throw new Error(
+        `No ${config.benchmarkCode} adj_close on first-data date ${firstWithData} for ${config.basketId}`
+      );
+    }
     anchorDate = firstWithData;
-    anchorIndexLevel = config.syntheticBaseLevel ?? 1000;
+    anchorIndexLevel = benchmarkLevel;
   }
   console.log(`Anchor: ${anchorDate}  index_level=${anchorIndexLevel}  (source=${source.kind})`);
 
