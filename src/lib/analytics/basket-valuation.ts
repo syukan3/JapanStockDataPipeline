@@ -318,6 +318,99 @@ export function waterFillCap(inputs: CapInput[]): Map<string, number> {
 }
 
 // ============================================================
+// 構成銘柄ウエートの決定（curated 水充填キャップ / sector33_auto 均等係数）
+// ============================================================
+
+/**
+ * バスケットの構成銘柄・ウエート係数の決定方法。
+ * - curated: 手動キュレーション（200A）。アンカー日の時価総額シェアに機械キャップ（水充填）を適用。
+ * - sector33_auto: TOPIX-33業種の自動導出（銀行業等）。キャップ無し＝時価総額シェアそのものが
+ *   ウエートのため weight_factor は全銘柄一律1・official_weight は null に単純化する。
+ */
+export type ConstituentSourceConfig =
+  | { kind: 'curated'; capMain: number; capOther: number }
+  | { kind: 'sector33_auto' };
+
+/** アンカー日の時価総額（resolveConstituentWeights の入力・1銘柄分） */
+export interface AnchorMcapInput {
+  code: string;
+  /** アンカー日時価総額（curated のキャップ配分のみに使用）。sector33_auto では無視 */
+  mcap: number;
+  /** 半導体主業か（curated のキャップ枠選択にのみ使用）。sector33_auto では無視 */
+  isSemiconMain: boolean;
+}
+
+/** basket_constituents に投入するウエート係数（1銘柄分） */
+export interface ResolvedConstituentWeight {
+  code: string;
+  /** 公式（機械キャップ）ウエート ÷ アンカー日時価総額シェア。sector33_auto は 1 */
+  weightFactor: number;
+  /** アンカー日の公式ウエート%（curated のみ）。sector33_auto は null */
+  officialWeight: number | null;
+}
+
+/**
+ * 構成銘柄のウエート係数を決定方法（curated / sector33_auto）に応じて算出する。
+ * seed（バックフィル）の初回投入と refresh-sector-basket-constituents（日次差分）で共有する。
+ */
+export function resolveConstituentWeights(
+  config: ConstituentSourceConfig,
+  anchors: AnchorMcapInput[]
+): ResolvedConstituentWeight[] {
+  if (config.kind === 'sector33_auto') {
+    // TOPIX-33業種はキャップ無し。時価総額シェアそのものがウエートなので
+    // weight_factor=1（日次 w_i(t)=mcap_i/Σmcap がそのまま公式ウエートに一致）。
+    return anchors.map((a) => ({ code: a.code, weightFactor: 1, officialWeight: null }));
+  }
+  const total = anchors.reduce((s, a) => s + a.mcap, 0);
+  if (total <= 0) throw new Error('resolveConstituentWeights: total anchor mcap must be positive');
+  const capInputs: CapInput[] = anchors.map((a) => ({
+    code: a.code,
+    rawShare: a.mcap / total,
+    capLimit: a.isSemiconMain ? config.capMain : config.capOther,
+  }));
+  const capped = waterFillCap(capInputs);
+  return anchors.map((a) => {
+    const rawShare = a.mcap / total;
+    const w = capped.get(a.code)!;
+    return { code: a.code, weightFactor: w / rawShare, officialWeight: w * 100 };
+  });
+}
+
+/**
+ * 当日カバレッジ算出に用いる officialWeight を返す。
+ * curated は保存済みの公式ウエート%をそのまま使う。sector33_auto は official_weight=null で
+ * 保存されるため均等按分（100/N）を用い、カバレッジを「データが揃った銘柄数の割合%」にする。
+ */
+export function effectiveCoverageWeight(
+  officialWeight: number | null,
+  constituentCount: number
+): number {
+  if (officialWeight != null) return officialWeight;
+  return constituentCount > 0 ? 100 / constituentCount : 0;
+}
+
+/** sector33_auto 構成銘柄の差分（equity_master 現行 vs basket_constituents 現行） */
+export interface ConstituentDiff {
+  /** equity_master にあり basket_constituents に無い（新規上場・セクター編入） */
+  toAdd: string[];
+  /** basket_constituents にあり equity_master に無い（上場廃止・セクター変更） */
+  toClose: string[];
+}
+
+/**
+ * 業種自動導出バスケットの構成銘柄差分を計算する（純関数）。
+ * refresh-sector-basket-constituents の日次差分更新で使用する。
+ */
+export function diffSectorConstituents(current: string[], existing: string[]): ConstituentDiff {
+  const cur = new Set(current);
+  const exist = new Set(existing);
+  const toAdd = [...new Set(current.filter((c) => !exist.has(c)))].sort();
+  const toClose = [...new Set(existing.filter((c) => !cur.has(c)))].sort();
+  return { toAdd, toClose };
+}
+
+// ============================================================
 // 日次集計（調和集計）
 // ============================================================
 

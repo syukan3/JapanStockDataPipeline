@@ -31,6 +31,7 @@ import {
   aggregateBasketDay,
   buildConstituentDay,
   chainIndexSeries,
+  effectiveCoverageWeight,
   type ConstituentDay,
   type SplitEvent,
   type PitFinancials,
@@ -143,6 +144,8 @@ async function refreshBasket(
   const barDates = prevRow ? [prevRow.as_of_date, targetDate] : [targetDate];
   const barsByCode = await getBarsForDates(core, codes, barDates);
 
+  // sector33_auto は official_weight=null で保存されるため、カバレッジは均等按分(100/N)で算出する
+  // （curated は保存済みの公式ウエート%をそのまま使う）。effectiveCoverageWeight が両者を吸収する。
   const buildItems = (date: string): ConstituentDay[] => {
     const items: ConstituentDay[] = [];
     for (const c of constituents) {
@@ -150,7 +153,7 @@ async function refreshBasket(
         {
           code: c.local_code,
           factor: c.weight_factor,
-          officialWeight: c.official_weight ?? 0,
+          officialWeight: effectiveCoverageWeight(c.official_weight, constituents.length),
           close: barsByCode.get(c.local_code)?.get(date)?.close,
           pit: pitByCode.get(c.local_code) ?? emptyPit(),
           events: splitEventsByCode.get(c.local_code) ?? [],

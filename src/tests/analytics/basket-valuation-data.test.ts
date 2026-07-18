@@ -9,6 +9,7 @@ import {
   parseBasketConstituentRow,
   toNumericDisclosure,
   fetchDisclosuresGrouped,
+  fetchSector33Constituents,
   buildPitByCode,
 } from '@/lib/analytics/basket-valuation-data';
 import type { RawDisclosure } from '@/lib/analytics/basket-valuation';
@@ -153,6 +154,53 @@ describe('fetchDisclosuresGrouped', () => {
   it('PostgRESTエラーは例外にする', async () => {
     const core = createCoreMock([{ data: null, error: { message: 'boom' } }]);
     await expect(fetchDisclosuresGrouped(core, ['80350'])).rejects.toThrow(/boom/);
+  });
+});
+
+// ============================================================
+// fetchSector33Constituents（equity_master 業種導出・thenableでモック）
+// ============================================================
+
+function createEquityMasterMock(
+  pages: { data: unknown[] | null; error: { message: string } | null }[]
+): { from: ReturnType<typeof vi.fn>; chain: Record<string, ReturnType<typeof vi.fn>> } {
+  let call = 0;
+  const chain: Record<string, ReturnType<typeof vi.fn>> = {};
+  for (const m of ['select', 'eq', 'order']) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  chain.range = vi.fn().mockImplementation(() =>
+    Promise.resolve(pages[call++] ?? { data: [], error: null })
+  );
+  return { from: vi.fn().mockReturnValue(chain), chain };
+}
+
+describe('fetchSector33Constituents', () => {
+  it('is_current=true かつ sector33_name 一致の local_code を昇順で返す', async () => {
+    const core = createEquityMasterMock([
+      { data: [{ local_code: '83060' }, { local_code: '83160' }], error: null },
+    ]);
+    const codes = await fetchSector33Constituents(core, '銀行業');
+    expect(codes).toEqual(['83060', '83160']);
+    expect(core.chain.eq).toHaveBeenCalledWith('is_current', true);
+    expect(core.chain.eq).toHaveBeenCalledWith('sector33_name', '銀行業');
+  });
+
+  it('1000行のページはフルページとみなし次ページを取得する', async () => {
+    const fullPage = Array.from({ length: 1000 }, (_, i) => ({ local_code: `C${i}` }));
+    const core = createEquityMasterMock([
+      { data: fullPage, error: null },
+      { data: [{ local_code: 'LAST' }], error: null },
+    ]);
+    const codes = await fetchSector33Constituents(core, '銀行業');
+    expect(codes).toHaveLength(1001);
+    expect(core.chain.range).toHaveBeenCalledTimes(2);
+    expect(core.chain.range).toHaveBeenNthCalledWith(2, 1000, 1999);
+  });
+
+  it('PostgRESTエラーは例外にする', async () => {
+    const core = createEquityMasterMock([{ data: null, error: { message: 'boom' } }]);
+    await expect(fetchSector33Constituents(core, '銀行業')).rejects.toThrow(/boom/);
   });
 });
 

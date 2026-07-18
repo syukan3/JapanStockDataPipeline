@@ -135,6 +135,19 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/refresh-factor-vectors.ts
 
+      # 業種自動導出バスケット（銀行業/1615 等）の構成銘柄を equity_master から日次差分更新。
+      # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
+      # 当日集計(refresh-basket-metrics)の *前* に構成銘柄を確定するため、このステップを先に置く
+      # （GitHub Actions はステップを記述順に逐次実行するため順序が保証される）。
+      # マイグレーション 00106 未適用（constituent_source 列が無い）の間は「未適用スキップ」で正常終了する。
+      - name: Refresh sector basket constituents (analytics.basket_constituents)
+        if: always() && steps.equity_master.outcome == 'success'
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/refresh-sector-basket-constituents.ts
+
       # テーマバスケット割安判定（analytics.basket_metrics）の日次集計。
       # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
       # 構成銘柄の当日バリュエーションは equity_bar_daily + financial_disclosure のPIT計算
