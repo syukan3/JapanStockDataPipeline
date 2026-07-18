@@ -256,6 +256,23 @@ describe('batch.ts', () => {
       expect(eqMock).toHaveBeenCalledWith('status', 'active');
     });
 
+    it('is演算子のfilterオプションが適用される(valid_to is nullなど)', async () => {
+      const isMock = vi.fn().mockReturnThis();
+      const mockSupabase = {
+        from: vi.fn(() => ({
+          select: vi.fn().mockReturnThis(),
+          is: isMock,
+          range: vi.fn().mockResolvedValue({ data: [], error: null }),
+        })),
+      };
+
+      await batchSelect(mockSupabase as any, 'test_table', {
+        filter: { column: 'valid_to', operator: 'is', value: null },
+      });
+
+      expect(isMock).toHaveBeenCalledWith('valid_to', null);
+    });
+
     it('orderByオプションが適用される', async () => {
       const orderMock = vi.fn().mockReturnThis();
       const mockSupabase = {

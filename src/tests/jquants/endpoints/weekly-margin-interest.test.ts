@@ -220,7 +220,7 @@ describe('syncWeeklyMarginInterestWithWindow', () => {
 });
 
 describe('fetchProtectedLocalCodes', () => {
-  it('未削除ポートフォリオの純保有>0とウォッチ銘柄を重複なしで返す', async () => {
+  it('未削除ポートフォリオの純保有>0とウォッチ銘柄とバスケット構成銘柄を重複なしで返す', async () => {
     mocks.createAdminClient.mockReturnValue({ tag: 'portfolio-client' });
     mocks.batchSelect
       .mockResolvedValueOnce([
@@ -239,17 +239,33 @@ describe('fetchProtectedLocalCodes', () => {
       .mockResolvedValueOnce([
         { local_code: '86970' },
         { local_code: '57130' },
+      ])
+      .mockResolvedValueOnce([
+        // 68570: バスケット現行構成銘柄（保有/ウォッチと重複なし）
+        { local_code: '68570' },
+        // 57130: バスケットにも含まれる（重複除去の確認）
+        { local_code: '57130' },
       ]);
 
     const codes = await fetchProtectedLocalCodes();
 
     expect(mocks.createAdminClient).toHaveBeenCalledWith('portfolio');
-    expect(codes).toEqual(['57130', '86970']);
+    expect(mocks.createAdminClient).toHaveBeenCalledWith('analytics');
+    expect(mocks.batchSelect).toHaveBeenNthCalledWith(
+      4,
+      expect.anything(),
+      'basket_constituents',
+      expect.objectContaining({
+        filter: { column: 'valid_to', operator: 'is', value: null },
+      })
+    );
+    expect(codes).toEqual(['57130', '68570', '86970']);
   });
 
-  it('取引もウォッチも無ければ空配列を返す', async () => {
+  it('取引もウォッチもバスケットも無ければ空配列を返す', async () => {
     mocks.createAdminClient.mockReturnValue({});
     mocks.batchSelect
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
@@ -321,13 +337,14 @@ describe('pruneWeeklyMarginInterest', () => {
     expect(from).toHaveBeenCalledTimes(1);
   });
 
-  it('保護リスト未指定ならportfolioスキーマから取得する', async () => {
+  it('保護リスト未指定ならportfolio/analyticsスキーマから取得する', async () => {
     mocks.createAdminClient.mockReturnValue({});
     mocks.batchSelect
       .mockResolvedValueOnce([{ id: 'p1', deleted_at: null }])
       .mockResolvedValueOnce([
         { portfolio_id: 'p1', local_code: '57130', trade_type: 'buy', quantity: 100 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { from, chains } = createSupabase([

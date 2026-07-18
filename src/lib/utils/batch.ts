@@ -154,7 +154,7 @@ export async function batchSelect<T>(
     pageSize?: number;
     maxPages?: number;
     columns?: string;
-    filter?: { column: string; operator: string; value: unknown };
+    filter?: { column: string; operator: 'eq' | 'gte' | 'lte' | 'gt' | 'lt' | 'is'; value: unknown };
     orderBy?: { column: string; ascending?: boolean };
   }
 ): Promise<T[]> {
@@ -187,6 +187,10 @@ export async function batchSelect<T>(
           break;
         case 'lt':
           queryBuilder = queryBuilder.lt(column, value);
+          break;
+        case 'is':
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          queryBuilder = queryBuilder.is(column, value as any);
           break;
       }
     }
