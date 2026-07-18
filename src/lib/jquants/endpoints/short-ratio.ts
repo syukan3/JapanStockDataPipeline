@@ -120,6 +120,37 @@ export async function fetchShortRatio(
   }
 }
 
+/** [from, to] の暦日を昇順で列挙 */
+export function enumerateCalendarDates(from: string, to: string): string[] {
+  const out: string[] = [];
+  const cur = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cur <= end) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/**
+ * ウィンドウ内の全暦日を date= 指定で取得して結合する。
+ *
+ * NOTE: /v2/markets/short-ratio は from/to 単独指定を受け付けない
+ * （"This API requires at least 1 parameter as follows; 'date','s33'."）。
+ * ウィンドウ取得は日次ループで行う（非営業日は空レスポンス）。
+ */
+async function fetchShortRatioByDates(
+  client: JQuantsClient,
+  dates: string[]
+): Promise<ShortRatioItem[]> {
+  const out: ShortRatioItem[] = [];
+  for (const date of dates) {
+    const items = await fetchShortRatio(client, { date });
+    out.push(...items);
+  }
+  return out;
+}
+
 /**
  * 業種別空売り比率を取得して analytics.short_selling_sector に保存
  *
@@ -137,7 +168,7 @@ export async function syncShortRatio(
 
   try {
     logger.info('Fetching short ratio', { from, to });
-    const items = await fetchShortRatio(client, { from, to });
+    const items = await fetchShortRatioByDates(client, enumerateCalendarDates(from, to));
 
     if (items.length === 0) {
       logger.info('No short ratio data found', { from, to });
@@ -160,4 +191,75 @@ export async function syncShortRatio(
     timer.endWithError(error as Error);
     throw error;
   }
+}
+
+/**
+ * 33業種コードを実データから発見する（baseDate から最大 lookbackDays 遡って
+ * 最初にデータのある日の S33 一覧を返す）。
+ *
+ * NOTE: リポジトリに業種コードの静的リストを持たない方針のため、
+ * seed の業種ループはこの動的発見に依存する。
+ */
+export async function discoverSector33Codes(
+  client: JQuantsClient,
+  baseDate: string,
+  lookbackDays = 10
+): Promise<string[]> {
+  const cur = new Date(`${baseDate}T00:00:00Z`);
+  for (let i = 0; i <= lookbackDays; i++) {
+    const date = cur.toISOString().slice(0, 10);
+    const items = await fetchShortRatio(client, { date });
+    if (items.length > 0) {
+      return [...new Set(items.map((it) => it.S33))].sort();
+    }
+    cur.setUTCDate(cur.getUTCDate() - 1);
+  }
+  throw new Error(
+    `No short-ratio data found within ${lookbackDays} days back from ${baseDate} (sector discovery failed)`
+  );
+}
+
+export interface SyncShortRatioBySectorsResult {
+  fetched: number;
+  inserted: number;
+  sectors: number;
+  errors: Error[];
+}
+
+/**
+ * 業種ごとに s33 + from/to で全期間を取得して保存する（seed 用バックフィル経路）。
+ *
+ * 日次ループ（syncShortRatio）は長期間だとリクエスト数が暦日数に比例するため、
+ * バックフィルは33業種 × 1リクエスト（+ページネーション）で取得する。
+ */
+export async function syncShortRatioBySectors(options: {
+  from: string;
+  to: string;
+  client?: JQuantsClient;
+  logContext?: LogContext;
+  supabase?: AdminClient;
+  /** 取得のみ（DB書き込みなし） */
+  dryRun?: boolean;
+  /** 業種発見の基準日（デフォルト: to） */
+  discoveryBaseDate?: string;
+}): Promise<SyncShortRatioBySectorsResult> {
+  const client = options.client ?? createJQuantsClient({ logContext: options.logContext });
+  const logger = createLogger({ dataset: TABLE_NAME, ...options.logContext });
+  const supabase = options.supabase ?? createAdminClient('analytics');
+
+  const sectors = await discoverSector33Codes(client, options.discoveryBaseDate ?? options.to);
+  logger.info('Discovered sector33 codes', { count: sectors.length });
+
+  let fetched = 0;
+  let inserted = 0;
+  const errors: Error[] = [];
+  for (const s33 of sectors) {
+    const items = await fetchShortRatio(client, { s33, from: options.from, to: options.to });
+    fetched += items.length;
+    if (options.dryRun || items.length === 0) continue;
+    const result = await batchUpsert(supabase, TABLE_NAME, items.map(toShortSellingSectorRecord), ON_CONFLICT);
+    inserted += result.inserted;
+    errors.push(...result.errors);
+  }
+  return { fetched, inserted, sectors: sectors.length, errors };
 }

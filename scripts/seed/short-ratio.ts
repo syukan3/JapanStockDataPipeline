@@ -60,19 +60,6 @@ function parseSeedArgs(): Args {
   return args;
 }
 
-/** [from, to] を暦年単位のウィンドウに分割（1リクエストが巨大化するのを避ける） */
-function yearlyWindows(from: string, to: string): Array<{ from: string; to: string }> {
-  const windows: Array<{ from: string; to: string }> = [];
-  const startYear = Number(from.slice(0, 4));
-  const endYear = Number(to.slice(0, 4));
-  for (let y = startYear; y <= endYear; y++) {
-    const wFrom = y === startYear ? from : `${y}-01-01`;
-    const wTo = y === endYear ? to : `${y}-12-31`;
-    windows.push({ from: wFrom, to: wTo });
-  }
-  return windows;
-}
-
 async function main(): Promise<void> {
   loadEnv();
   const args = parseSeedArgs();
@@ -84,37 +71,34 @@ async function main(): Promise<void> {
 
   // 動的インポート（環境変数ロード後）
   const { createAdminClient } = await import('../../src/lib/supabase/admin');
-  const { syncShortRatio } = await import('../../src/lib/jquants/endpoints/short-ratio');
+  const { syncShortRatioBySectors } = await import('../../src/lib/jquants/endpoints/short-ratio');
   const { fillShortSellingOfficial } = await import('../../src/lib/market/indicators-sync');
 
   const analytics = createAdminClient('analytics');
   const summary: Record<string, unknown> = {};
   const failures: string[] = [];
 
-  // ---- 1) 業種別データを暦年ウィンドウで取得・投入 ----
-  const windows = yearlyWindows(args.from, args.to);
-  let totalFetched = 0;
-  let totalInserted = 0;
-  for (const w of windows) {
-    if (args.dryRun) {
-      // dryRun では short_selling_sector を変更しないため取得のみ行い件数を確認する
-      const { fetchShortRatio } = await import('../../src/lib/jquants/endpoints/short-ratio');
-      const { createJQuantsClient } = await import('../../src/lib/jquants/client');
-      const items = await fetchShortRatio(createJQuantsClient(), { from: w.from, to: w.to });
-      totalFetched += items.length;
-      console.log(`  [${w.from}..${w.to}] fetched=${items.length} (dry-run: not written)`);
-      continue;
+  // ---- 1) 業種別データを業種ループ（s33 + from/to）で取得・投入 ----
+  // NOTE: /markets/short-ratio は from/to 単独指定不可（date か s33 が必須）のため、
+  // バックフィルは業種発見 → 33業種 × 1リクエスト方式で行う。
+  try {
+    const result = await syncShortRatioBySectors({
+      from: args.from,
+      to: args.to,
+      supabase: analytics,
+      dryRun: args.dryRun,
+    });
+    console.log(
+      `  sectors=${result.sectors} fetched=${result.fetched} inserted=${result.inserted}` +
+        (args.dryRun ? ' (dry-run: not written)' : '')
+    );
+    summary.sector = result;
+    if (result.errors.length > 0) {
+      failures.push(...result.errors.map((e) => `sector: ${e.message}`));
     }
-    try {
-      const result = await syncShortRatio({ from: w.from, to: w.to, supabase: analytics });
-      totalFetched += result.fetched;
-      totalInserted += result.inserted;
-      console.log(`  [${w.from}..${w.to}] fetched=${result.fetched} inserted=${result.inserted}`);
-    } catch (e) {
-      failures.push(`sector[${w.from}..${w.to}]: ${e instanceof Error ? e.message : String(e)}`);
-    }
+  } catch (e) {
+    failures.push(`sector: ${e instanceof Error ? e.message : String(e)}`);
   }
-  summary.sector = { fetched: totalFetched, inserted: totalInserted, windows: windows.length };
 
   // ---- 2) 全期間の市場全体2成分を公式値で再計算（daily2由来値を上書き）----
   try {

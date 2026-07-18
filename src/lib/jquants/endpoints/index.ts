@@ -159,9 +159,13 @@ export {
 // 業種別空売り比率
 export {
   syncShortRatio,
+  syncShortRatioBySectors,
   fetchShortRatio,
   toShortSellingSectorRecord,
   resolveShortRatioWindow,
+  discoverSector33Codes,
+  enumerateCalendarDates,
   type SyncShortRatioOptions,
   type SyncShortRatioResult,
+  type SyncShortRatioBySectorsResult,
 } from './short-ratio';

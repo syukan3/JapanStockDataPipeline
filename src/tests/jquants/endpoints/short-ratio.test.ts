@@ -9,6 +9,7 @@ import {
   resolveShortRatioWindow,
   fetchShortRatio,
   syncShortRatio,
+  syncShortRatioBySectors,
 } from '@/lib/jquants/endpoints/short-ratio';
 
 function item(date: string, s33: string, patch: Partial<ShortRatioItem> = {}): ShortRatioItem {
@@ -79,39 +80,113 @@ describe('resolveShortRatioWindow', () => {
 });
 
 describe('syncShortRatio', () => {
-  it('取得行を変換して batchUpsert へ渡す', async () => {
-    const client = {
-      getShortRatio: vi
-        .fn()
-        .mockResolvedValue([item('2026-07-15', '0050'), item('2026-07-15', '1050')]),
-    } as unknown as JQuantsClient;
+  it('ウィンドウ内の暦日を date= 指定で日次取得し、変換して batchUpsert へ渡す', async () => {
+    // /markets/short-ratio は from/to 単独指定不可（date か s33 必須）のため日次ループになる
+    const getShortRatio = vi.fn().mockImplementation(({ date }: { date: string }) => {
+      if (date === '2026-07-14') return Promise.resolve([item('2026-07-14', '0050')]);
+      if (date === '2026-07-15') return Promise.resolve([item('2026-07-15', '1050')]);
+      return Promise.resolve([]); // 非営業日は空
+    });
+    const client = { getShortRatio } as unknown as JQuantsClient;
     const supa = mockSupabase();
 
     const result = await syncShortRatio({
+      client,
+      supabase: supa.client,
+      from: '2026-07-13',
+      to: '2026-07-15',
+    });
+
+    expect(getShortRatio).toHaveBeenCalledTimes(3); // 07-13/14/15 の3暦日
+    expect(getShortRatio).toHaveBeenCalledWith({ date: '2026-07-13' });
+    expect(getShortRatio).toHaveBeenCalledWith({ date: '2026-07-15' });
+    expect(supa.from).toHaveBeenCalledWith('short_selling_sector');
+    expect(supa.upsert).toHaveBeenCalledTimes(1);
+    const [chunk, opts] = supa.upsert.mock.calls[0];
+    expect(opts).toMatchObject({ onConflict: 'as_of_date,sector33_code' });
+    expect(chunk).toEqual([
+      expect.objectContaining({ as_of_date: '2026-07-14', sector33_code: '0050' }),
+      expect.objectContaining({ as_of_date: '2026-07-15', sector33_code: '1050' }),
+    ]);
+    expect(result).toMatchObject({ fetched: 2, inserted: 2, from: '2026-07-13', to: '2026-07-15' });
+  });
+
+  it('全日0件なら upsert を呼ばない', async () => {
+    const client = { getShortRatio: vi.fn().mockResolvedValue([]) } as unknown as JQuantsClient;
+    const supa = mockSupabase();
+    const result = await syncShortRatio({
+      client,
+      supabase: supa.client,
+      from: '2026-07-13',
+      to: '2026-07-14',
+    });
+    expect(supa.upsert).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ fetched: 0, inserted: 0 });
+  });
+});
+
+describe('syncShortRatioBySectors（seed バックフィル経路）', () => {
+  it('業種を実データから発見し、業種ごとに s33+from/to で取得して upsert する', async () => {
+    const getShortRatio = vi.fn().mockImplementation((params: Record<string, string>) => {
+      if (params.date === '2026-07-15') {
+        // 業種発見用（当日データに2業種）
+        return Promise.resolve([item('2026-07-15', '1050'), item('2026-07-15', '0050')]);
+      }
+      if (params.s33) {
+        return Promise.resolve([
+          item('2026-07-14', params.s33),
+          item('2026-07-15', params.s33),
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const client = { getShortRatio } as unknown as JQuantsClient;
+    const supa = mockSupabase();
+
+    const result = await syncShortRatioBySectors({
       client,
       supabase: supa.client,
       from: '2026-07-01',
       to: '2026-07-15',
     });
 
-    expect(client.getShortRatio).toHaveBeenCalledWith({ from: '2026-07-01', to: '2026-07-15' });
-    expect(supa.from).toHaveBeenCalledWith('short_selling_sector');
-    expect(supa.upsert).toHaveBeenCalledTimes(1);
-    const [chunk, opts] = supa.upsert.mock.calls[0];
-    expect(opts).toMatchObject({ onConflict: 'as_of_date,sector33_code' });
-    expect(chunk).toEqual([
-      expect.objectContaining({ as_of_date: '2026-07-15', sector33_code: '0050' }),
-      expect.objectContaining({ as_of_date: '2026-07-15', sector33_code: '1050' }),
-    ]);
-    expect(result).toMatchObject({ fetched: 2, inserted: 2, from: '2026-07-01', to: '2026-07-15' });
+    expect(getShortRatio).toHaveBeenCalledWith({ date: '2026-07-15' });
+    expect(getShortRatio).toHaveBeenCalledWith({ s33: '0050', from: '2026-07-01', to: '2026-07-15' });
+    expect(getShortRatio).toHaveBeenCalledWith({ s33: '1050', from: '2026-07-01', to: '2026-07-15' });
+    expect(result).toMatchObject({ sectors: 2, fetched: 4, inserted: 4 });
   });
 
-  it('0件なら upsert を呼ばない', async () => {
-    const client = { getShortRatio: vi.fn().mockResolvedValue([]) } as unknown as JQuantsClient;
+  it('dryRun では取得のみで upsert しない', async () => {
+    const getShortRatio = vi.fn().mockImplementation((params: Record<string, string>) => {
+      if (params.date) return Promise.resolve([item('2026-07-15', '0050')]);
+      return Promise.resolve([item('2026-07-15', '0050')]);
+    });
+    const client = { getShortRatio } as unknown as JQuantsClient;
     const supa = mockSupabase();
-    const result = await syncShortRatio({ client, supabase: supa.client, from: 'a', to: 'b' });
+    const result = await syncShortRatioBySectors({
+      client,
+      supabase: supa.client,
+      from: '2026-07-01',
+      to: '2026-07-15',
+      dryRun: true,
+    });
     expect(supa.upsert).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ fetched: 0, inserted: 0 });
+    expect(result).toMatchObject({ sectors: 1, fetched: 1, inserted: 0 });
+  });
+
+  it('遡り範囲内にデータが無ければ業種発見に失敗して throw する', async () => {
+    const client = {
+      getShortRatio: vi.fn().mockResolvedValue([]),
+    } as unknown as JQuantsClient;
+    const supa = mockSupabase();
+    await expect(
+      syncShortRatioBySectors({
+        client,
+        supabase: supa.client,
+        from: '2026-07-01',
+        to: '2026-07-15',
+      })
+    ).rejects.toThrow(/sector discovery failed/);
   });
 });
 
