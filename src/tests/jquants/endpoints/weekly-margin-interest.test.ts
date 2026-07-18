@@ -187,17 +187,17 @@ describe('syncWeeklyMarginInterestWithWindow', () => {
     mocks.batchUpsert.mockResolvedValue({ inserted: 0, errors: [], batchCount: 0 });
   });
 
-  it('デフォルト35日ウィンドウのfrom/toをJSTで計算する', async () => {
+  it('デフォルト35日ウィンドウの暦日を date= 指定で日次ループ取得する', async () => {
+    // /markets/margin-interest は from/to 単独指定不可（code か date が必須）のため日次ループになる
     const apiClient = client([]);
     await syncWeeklyMarginInterestWithWindow(undefined, {
       client: apiClient,
       baseDate: new Date('2026-07-18T00:00:00+09:00'),
     });
 
-    expect(apiClient.getWeeklyMarginInterest).toHaveBeenCalledWith({
-      from: '2026-06-13',
-      to: '2026-07-18',
-    });
+    expect(apiClient.getWeeklyMarginInterest).toHaveBeenCalledTimes(36); // 06-13〜07-18 の36暦日
+    expect(apiClient.getWeeklyMarginInterest).toHaveBeenNthCalledWith(1, { date: '2026-06-13' });
+    expect(apiClient.getWeeklyMarginInterest).toHaveBeenLastCalledWith({ date: '2026-07-18' });
   });
 
   it('windowDaysを1〜365にクランプする', async () => {
@@ -207,10 +207,9 @@ describe('syncWeeklyMarginInterestWithWindow', () => {
       baseDate: new Date('2026-07-18T00:00:00+09:00'),
     });
 
-    expect(apiClient.getWeeklyMarginInterest).toHaveBeenCalledWith({
-      from: '2025-07-18',
-      to: '2026-07-18',
-    });
+    expect(apiClient.getWeeklyMarginInterest).toHaveBeenCalledTimes(366); // 365日クランプ+当日
+    expect(apiClient.getWeeklyMarginInterest).toHaveBeenNthCalledWith(1, { date: '2025-07-18' });
+    expect(apiClient.getWeeklyMarginInterest).toHaveBeenLastCalledWith({ date: '2026-07-18' });
   });
 
   it('非有限のwindowDaysを拒否する', async () => {

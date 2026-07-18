@@ -217,7 +217,19 @@ export async function syncWeeklyMarginInterestWithWindow(
   const to = getJSTDate(baseDate);
   const from = addDays(to, -validWindowDays);
 
-  return syncWeeklyMarginInterest({ from, to }, options);
+  // NOTE: /v2/markets/margin-interest は from/to 単独指定を受け付けない（code か date が必須。
+  // 2026-07-18 の初回本番実行で HTTP 400 を実地確認）。ウィンドウ再取得は暦日ループの
+  // date= 指定で行う（申込日以外の日は空レスポンス。冪等upsertのため重複取得も無害）。
+  const merged: SyncWeeklyMarginInterestResult = { fetched: 0, inserted: 0, errors: [] };
+  let date = from;
+  while (date <= to) {
+    const result = await syncWeeklyMarginInterest({ date }, options);
+    merged.fetched += result.fetched;
+    merged.inserted += result.inserted;
+    merged.errors.push(...result.errors);
+    date = addDays(date, 1);
+  }
+  return merged;
 }
 
 /**
