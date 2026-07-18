@@ -198,6 +198,55 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
     metricsFrom: '2019-01-04',
     source: { kind: 'sector33_auto', sector33Filter: '不動産業' },
   },
+  'topix33-pharma-1621': {
+    basketId: 'topix33-pharma-1621',
+    displayName: '医薬品 (1621)',
+    benchmarkCode: '16210',
+    description:
+      'TOPIX-33業種「医薬品」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。TOPIX-17「医薬品」は医薬品単独区分と1:1のためベンチマークETF(1621)の' +
+      'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
+      '基準として同一スケールで連結する。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '医薬品' },
+  },
+  'topix33-machinery-1624': {
+    basketId: 'topix33-machinery-1624',
+    displayName: '機械 (1624)',
+    benchmarkCode: '16240',
+    description:
+      'TOPIX-33業種「機械」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。TOPIX-17「機械」は機械単独区分と1:1のためベンチマークETF(1624)の' +
+      'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
+      '基準として同一スケールで連結する。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '機械' },
+  },
+  'topix33-utilities-1627': {
+    basketId: 'topix33-utilities-1627',
+    displayName: '電気・ガス業 (1627)',
+    benchmarkCode: '16270',
+    description:
+      'TOPIX-33業種「電気･ガス業」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。TOPIX-17「電力・ガス」は電気･ガス業単独区分と1:1のためベンチマーク' +
+      'ETF(1627)のユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日に' +
+      'ETF実勢価格を基準として同一スケールで連結する。' +
+      '注意: equity_master.sector33_name の実値は半角中点「電気･ガス業」（全角の電気・ガス業ではない）。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '電気･ガス業' },
+  },
+  'topix33-retail-1630': {
+    basketId: 'topix33-retail-1630',
+    displayName: '小売業 (1630)',
+    benchmarkCode: '16300',
+    description:
+      'TOPIX-33業種「小売業」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。TOPIX-17「小売」は小売業単独区分と1:1のためベンチマークETF(1630)の' +
+      'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
+      '基準として同一スケールで連結する。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '小売業' },
+  },
 };
 
 const DEFAULT_BASKET_ID = 'nkscd-200a';
@@ -615,18 +664,20 @@ async function seedOneBasket(
     anchorDate = config.anchorDate!;
     anchorIndexLevel = curatedAnchorLevel!;
   } else {
-    const firstWithData = dates.find((d) => (weightsByDate.get(d)?.size ?? 0) > 0);
+    // 薄商いのベンチマークETF（例: 1630）は構成銘柄データが揃う初日に無取引でadj_closeが
+    // 欠けることがあるため、両条件（構成銘柄の重み ∧ ベンチマークadj_close）を満たす最初の日を探す。
+    const firstWithData = dates.find(
+      (d) =>
+        (weightsByDate.get(d)?.size ?? 0) > 0 &&
+        adjCloseByCode.get(config.benchmarkCode)?.get(d) != null
+    );
     if (!firstWithData) {
-      throw new Error(`No date with constituent price+PIT data for ${config.basketId}`);
-    }
-    const benchmarkLevel = adjCloseByCode.get(config.benchmarkCode)?.get(firstWithData);
-    if (benchmarkLevel == null) {
       throw new Error(
-        `No ${config.benchmarkCode} adj_close on first-data date ${firstWithData} for ${config.basketId}`
+        `No date with both constituent price+PIT data and ${config.benchmarkCode} adj_close for ${config.basketId}`
       );
     }
     anchorDate = firstWithData;
-    anchorIndexLevel = benchmarkLevel;
+    anchorIndexLevel = adjCloseByCode.get(config.benchmarkCode)!.get(firstWithData)!;
   }
   console.log(`Anchor: ${anchorDate}  index_level=${anchorIndexLevel}  (source=${source.kind})`);
 
