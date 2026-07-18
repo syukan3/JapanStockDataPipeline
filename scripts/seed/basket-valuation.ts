@@ -162,6 +162,42 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
     metricsFrom: '2019-01-04',
     source: { kind: 'sector33_auto', sector33Filter: '銀行業' },
   },
+  'topix33-transportequip-1622': {
+    basketId: 'topix33-transportequip-1622',
+    displayName: '輸送用機器 (1622)',
+    benchmarkCode: '16220',
+    description:
+      'TOPIX-33業種「輸送用機器」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。TOPIX-17「自動車・輸送機」は輸送用機器単独区分と1:1のためベンチマーク' +
+      'ETF(1622)のユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日に' +
+      'ETF実勢価格を基準として同一スケールで連結する。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '輸送用機器' },
+  },
+  'topix33-wholesale-1629': {
+    basketId: 'topix33-wholesale-1629',
+    displayName: '卸売業 (1629)',
+    benchmarkCode: '16290',
+    description:
+      'TOPIX-33業種「卸売業」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。TOPIX-17「商社・卸売」は卸売業単独区分と1:1のためベンチマークETF(1629)の' +
+      'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
+      '基準として同一スケールで連結する。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '卸売業' },
+  },
+  'topix33-realestate-1633': {
+    basketId: 'topix33-realestate-1633',
+    displayName: '不動産業 (1633)',
+    benchmarkCode: '16330',
+    description:
+      'TOPIX-33業種「不動産業」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。TOPIX-17「不動産」は不動産業単独区分と1:1のためベンチマークETF(1633)の' +
+      'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
+      '基準として同一スケールで連結する。',
+    metricsFrom: '2019-01-04',
+    source: { kind: 'sector33_auto', sector33Filter: '不動産業' },
+  },
 };
 
 const DEFAULT_BASKET_ID = 'nkscd-200a';
