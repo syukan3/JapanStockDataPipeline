@@ -21,6 +21,7 @@ import type {
   EarningsCalendarResponse,
   InvestorTypeTradingResponse,
   WeeklyMarginInterestResponse,
+  ShortRatioResponse,
   TradingCalendarItem,
   EquityMasterItem,
   EquityBarDailyItem,
@@ -29,6 +30,7 @@ import type {
   EarningsCalendarItem,
   InvestorTypeTradingItem,
   WeeklyMarginInterestItem,
+  ShortRatioItem,
 } from './types';
 
 const BASE_URL = 'https://api.jquants.com/v2';
@@ -361,6 +363,14 @@ export class JQuantsClient {
   ): AsyncGenerator<WeeklyMarginInterestItem[], void, unknown> {
     yield* this.requestPaginated<WeeklyMarginInterestItem, WeeklyMarginInterestResponse>(
       '/markets/margin-interest',
+   * 業種別空売り比率取得（ページネーション対応）
+   * V2 エンドポイント: GET /v2/markets/short-ratio
+   */
+  async *getShortRatioPaginated(
+    params: { s33?: string; date?: string; from?: string; to?: string }
+  ): AsyncGenerator<ShortRatioItem[], void, unknown> {
+    yield* this.requestPaginated<ShortRatioItem, ShortRatioResponse>(
+      '/markets/short-ratio',
       'data',
       { params }
     );
@@ -374,6 +384,13 @@ export class JQuantsClient {
   ): Promise<WeeklyMarginInterestItem[]> {
     return this.fetchAllPages<WeeklyMarginInterestItem, WeeklyMarginInterestResponse>(
       '/markets/margin-interest',
+   * 業種別空売り比率全件取得
+   */
+  async getShortRatio(
+    params: { s33?: string; date?: string; from?: string; to?: string }
+  ): Promise<ShortRatioItem[]> {
+    return this.fetchAllPages<ShortRatioItem, ShortRatioResponse>(
+      '/markets/short-ratio',
       'data',
       { params }
     );
@@ -397,4 +414,5 @@ export type {
   EarningsCalendarItem,
   InvestorTypeTradingItem,
   WeeklyMarginInterestItem,
+  ShortRatioItem,
 };
