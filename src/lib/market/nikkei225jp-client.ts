@@ -226,17 +226,45 @@ export function parseNikkei225jpWeekly(text: string): Nikkei225jpWeeklyRow[] {
   return out;
 }
 
-async function fetchText(url: string, referer?: string): Promise<string> {
+/**
+ * 取得経路を解決する。
+ *
+ * GitHub Actions ランナー（米国 Azure リージョン）からの直接取得は 2026-07-17 以降
+ * HTTP 403 になった。手元（日本）からは同一 UA/Referer で 200 が返るため、海外IP／
+ * データセンターIPの遮断とみている。403 は retry.ts の retryStatusCodes に含まれず
+ * リトライされないので、経路自体を変えるしかない。
+ *
+ * NIKKEI225JP_PROXY_BASE_URL と CRON_SECRET が揃っている場合は、東京リージョン固定の
+ * 自前ルート（/api/proxy/nikkei225jp）経由で取得する。未設定なら従来どおり直接取得する
+ * （日本からのローカル実行・seed スクリプト用）。
+ */
+function resolveFetchTarget(file: 'daily2' | 'dailyweek2'): {
+  url: string;
+  headers: Record<string, string>;
+  viaProxy: boolean;
+} {
+  const base = process.env.NIKKEI225JP_PROXY_BASE_URL?.trim().replace(/\/+$/, '');
+  const secret = process.env.CRON_SECRET?.trim();
+  if (base && secret) {
+    return {
+      url: `${base}/api/proxy/nikkei225jp?file=${file}`,
+      headers: { Authorization: `Bearer ${secret}`, Accept: '*/*' },
+      viaProxy: true,
+    };
+  }
+  return {
+    url: file === 'daily2' ? DAILY2_URL : DAILYWEEK2_URL,
+    headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: '*/*', Referer: REFERER },
+    viaProxy: false,
+  };
+}
+
+async function fetchText(file: 'daily2' | 'dailyweek2'): Promise<string> {
+  const target = resolveFetchTarget(file);
   await getRateLimiter().acquire();
   const res = await fetchWithRetry(
-    url,
-    {
-      headers: {
-        'User-Agent': BROWSER_USER_AGENT,
-        Accept: '*/*',
-        ...(referer ? { Referer: referer } : {}),
-      },
-    },
+    target.url,
+    { headers: target.headers },
     { maxRetries: 3, baseDelayMs: 2000 }
   );
   return res.text();
@@ -244,8 +272,10 @@ async function fetchText(url: string, referer?: string): Promise<string> {
 
 /** daily2.json（PER・日経VI・空売り比率2成分・参照値）を取得してパース */
 export async function fetchNikkei225jpDaily(): Promise<Nikkei225jpDailyRow[]> {
-  logger.info('Fetching nikkei225jp daily2.json');
-  const text = await fetchText(DAILY2_URL, REFERER);
+  logger.info('Fetching nikkei225jp daily2.json', {
+    viaProxy: resolveFetchTarget('daily2').viaProxy,
+  });
+  const text = await fetchText('daily2');
   const rows = parseNikkei225jpDaily(text);
   logger.info('daily2.json parsed', { rows: rows.length });
   return rows;
@@ -253,8 +283,10 @@ export async function fetchNikkei225jpDaily(): Promise<Nikkei225jpDailyRow[]> {
 
 /** dailyweek2.json（信用評価損益率・週次）を取得してパース */
 export async function fetchNikkei225jpWeekly(): Promise<Nikkei225jpWeeklyRow[]> {
-  logger.info('Fetching nikkei225jp dailyweek2.json');
-  const text = await fetchText(DAILYWEEK2_URL, REFERER);
+  logger.info('Fetching nikkei225jp dailyweek2.json', {
+    viaProxy: resolveFetchTarget('dailyweek2').viaProxy,
+  });
+  const text = await fetchText('dailyweek2');
   const rows = parseNikkei225jpWeekly(text);
   logger.info('dailyweek2.json parsed', { rows: rows.length });
   return rows;

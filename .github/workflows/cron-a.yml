@@ -185,6 +185,10 @@ jobs:
           # 空売り比率はJ-Quants公式データ(short_selling_sector)から算出（2026-07切替）
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           SHORT_RATIO_SOURCE: jquants
+          # nikkei225jp.com は 2026-07-17 以降このランナー（米国リージョン）からの
+          # 直接取得が 403 になったため、東京リージョン固定の自前ルート経由で取得する。
+          NIKKEI225JP_PROXY_BASE_URL: ${{ secrets.VERCEL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: npx tsx scripts/cron/refresh-market-indicators.ts --skip-breadth
 
       - name: Notify on failure

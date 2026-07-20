@@ -4,7 +4,7 @@
  * 実レスポンス（2026-07-06取得）の構造を模したfixtureで列マッピングを固定する。
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { stableAcquire, mockFetchWithRetry } = vi.hoisted(() => ({
   stableAcquire: vi.fn().mockResolvedValue(undefined),
@@ -205,6 +205,54 @@ describe('fetch関数', () => {
     expect(rows).toHaveLength(1);
     const [url, init] = mockFetchWithRetry.mock.calls[0];
     expect(url).toContain('dailyweek2.json');
+    expect(init.headers.Referer).toContain('nikkei225jp.com');
+  });
+});
+
+// GH Actions ランナー（米国リージョン）からの直接取得が 403 になったため、
+// 東京リージョン固定の自前ルート経由に切り替えられること。
+describe('取得経路の切り替え（NIKKEI225JP_PROXY_BASE_URL）', () => {
+  beforeEach(() => {
+    mockFetchWithRetry.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function stubWeeklyResponse(): void {
+    const row: unknown[] = new Array(DAILYWEEK2_EXPECTED_COLS).fill('');
+    row[0] = D_20260703;
+    row[7] = -3.09;
+    mockFetchWithRetry.mockResolvedValue({
+      text: () => Promise.resolve(`var DAILY = ${JSON.stringify([row])};`),
+    });
+  }
+
+  it('プロキシ設定があるときは自前ルートへ Bearer 付きで取りにいく', async () => {
+    vi.stubEnv('NIKKEI225JP_PROXY_BASE_URL', 'https://example.vercel.app/');
+    vi.stubEnv('CRON_SECRET', 'secret-value');
+    stubWeeklyResponse();
+
+    await fetchNikkei225jpWeekly();
+
+    const [url, init] = mockFetchWithRetry.mock.calls[0];
+    // 末尾スラッシュは正規化され、二重スラッシュにならない
+    expect(url).toBe('https://example.vercel.app/api/proxy/nikkei225jp?file=dailyweek2');
+    expect(init.headers.Authorization).toBe('Bearer secret-value');
+    // プロキシ側が Referer/UA を付ける。ここでは付けない（秘密の露出面を増やさない）
+    expect(init.headers.Referer).toBeUndefined();
+  });
+
+  it('CRON_SECRET が無ければプロキシは使わず直接取得にフォールバックする', async () => {
+    vi.stubEnv('NIKKEI225JP_PROXY_BASE_URL', 'https://example.vercel.app');
+    vi.stubEnv('CRON_SECRET', '');
+    stubWeeklyResponse();
+
+    await fetchNikkei225jpWeekly();
+
+    const [url, init] = mockFetchWithRetry.mock.calls[0];
+    expect(url).toBe('https://nikkei225jp.com/_data/_nfsDATA/DAY/dailyweek2.json');
     expect(init.headers.Referer).toContain('nikkei225jp.com');
   });
 });
