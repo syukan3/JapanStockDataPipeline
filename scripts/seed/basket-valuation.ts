@@ -6,9 +6,14 @@
  * jquants_core.financial_disclosure の PIT（point-in-time）参照と組み合わせて、アンカー日
  * ウエート係数（basket_constituents）と日次集計（basket_metrics）を analytics へ投入する。
  *
- * 構成銘柄の決定方法（constituent_source）:
+ * 構成銘柄の決定方法（seed内部の resolveConstituentWeights モード。DB列 constituent_source は
+ * curated/curated_explicit をどちらも 'curated' として保存する。00106のCHECK制約が2値のみのため。
+ * 運用上も両者は同じ「手動更新・sector33自動リフレッシュ対象外」の扱い）:
  *   - curated（200A / 日経半導体株指数）: 手動キュレーションの30銘柄を時価総額加重+機械キャップ
  *     （通常15% / 非半導体主業5%）で水充填。アンカー日は直近定期見直し日。
+ *   - curated_explicit（2638 / フィジカルAI・ロボティクス）: 手動キュレーション銘柄にETFのPCF等
+ *     から転記した実ウエート%をそのまま使用（機械キャップ計算はしない。浮動株調整・個別上限は
+ *     実ウエートに織込み済みのため）。アンカー日は直近PCF転記日。
  *   - sector33_auto（銀行業/1615）: equity_master(is_current=true) の sector33_name 一致から
  *     構成銘柄を自動導出。キャップ無し＝時価総額シェアそのものがウエート（weight_factor=1）。
  *     公式指数は存在しないが、NAV軸（ETF実勢価格 vs 模擬指数）が同一スケールで意味を持つよう、
@@ -22,7 +27,8 @@
  * DB保持窓に収まらないため（DB経由では不可能）、API直取得が必須。DBへ株価を書き込むことは無い。
  *
  * 計画書: docs/PLANS-entry-timing-2026-07.md / docs/PLANS-basket-valuation-2026-07.md（ルートリポ）
- * DDL: 00105（3テーブル）/ 00106（constituent_source・sector33_filter 列追加）
+ * DDL: 00105（3テーブル）/ 00106（constituent_source・sector33_filter 列追加）/
+ *      00109（display_order 列追加）
  *
  * @example
  * ```
@@ -74,10 +80,13 @@ interface ConstituentDef {
   code: string;
   name: string;
   isSemiconMain: boolean;
+  /** curated_explicit のみ使用。ETFのPCF等から転記した公式ウエート%（合計は概ね100） */
+  weightPct?: number;
 }
 
 type SourceDef =
   | { kind: 'curated'; capMain: number; capOther: number; constituents: ConstituentDef[] }
+  | { kind: 'curated_explicit'; constituents: ConstituentDef[] }
   | { kind: 'sector33_auto'; sector33Filter: string };
 
 interface BasketSeedConfig {
@@ -88,13 +97,15 @@ interface BasketSeedConfig {
   /** basket_metrics の投入開始日（financial_disclosure が 2019-01〜のため） */
   metricsFrom: string;
   /**
-   * curated: 固定アンカー日（直近定期見直し日）。
+   * curated/curated_explicit: 固定アンカー日（直近定期見直し日）。
    * sector33_auto: undefined（公式指数の実在値が無いため、バックフィル系列の最初の営業日を
    * 実行時にアンカーとして採用する）。
    */
   anchorDate?: string;
   /** 検証レポートの個別PER突合対象（200A=80350/TEL）。無ければ突合をスキップ */
   spotCheckCode?: string;
+  /** バスケット一覧の表示順（analytics.basket_definitions.display_order・小さいほど上）。00109参照 */
+  displayOrder: number;
   source: SourceDef;
 }
 
@@ -132,6 +143,42 @@ const CONSTITUENTS_200A: ConstituentDef[] = [
   { code: '81540', name: '加賀電子', isSemiconMain: true },
 ];
 
+/**
+ * フィジカルAI・ロボティクス (2638・グローバルX ロボティクス＆AI-日本株式ETF) の構成銘柄。
+ * SolactiveのPCF（https://www.solactive.com/downloads/etfservices/tse-pcf/single/2638.csv、
+ * Fund Date 2026-07-23）から実ウエートを転記（ミニ先物・現金は除外済み。合計≈99.98%）。
+ * 浮動株調整・個別上限8%はこの実ウエートに織込み済みのため curated_explicit モードで扱う
+ * （機械キャップ計算はしない）。構成・ウエートは年1回程度PCFから手動更新する。
+ */
+const CONSTITUENTS_PHYSICAL_AI_2638: ConstituentDef[] = [
+  { code: '69140', name: 'オプテックスグループ', isSemiconMain: true, weightPct: 9.33 },
+  { code: '68610', name: 'キーエンス', isSemiconMain: true, weightPct: 9.0 },
+  { code: '47510', name: 'サイバーエージェント', isSemiconMain: true, weightPct: 8.27 },
+  { code: '46840', name: 'オービック', isSemiconMain: true, weightPct: 8.24 },
+  { code: '69540', name: 'ファナック', isSemiconMain: true, weightPct: 8.2 },
+  { code: '62680', name: 'ナブテスコ', isSemiconMain: true, weightPct: 8.02 },
+  { code: '65060', name: '安川電機', isSemiconMain: true, weightPct: 7.68 },
+  { code: '62730', name: 'SMC', isSemiconMain: true, weightPct: 7.56 },
+  { code: '44830', name: 'JMDC', isSemiconMain: true, weightPct: 6.37 },
+  { code: '41800', name: 'Appier Group', isSemiconMain: true, weightPct: 4.48 },
+  { code: '69290', name: '日本セラミック', isSemiconMain: true, weightPct: 4.04 },
+  { code: '65010', name: '日立製作所', isSemiconMain: true, weightPct: 3.75 },
+  { code: '39930', name: 'PKSHA Technology', isSemiconMain: true, weightPct: 3.68 },
+  { code: '42590', name: 'エクサウィザーズ', isSemiconMain: true, weightPct: 3.54 },
+  { code: '65030', name: '三菱電機', isSemiconMain: true, weightPct: 1.81 },
+  { code: '77790', name: 'CYBERDYNE', isSemiconMain: true, weightPct: 1.81 },
+  { code: '67230', name: 'ルネサスエレクトロニクス', isSemiconMain: true, weightPct: 1.28 },
+  { code: '67020', name: '富士通', isSemiconMain: true, weightPct: 0.99 },
+  { code: '69020', name: 'デンソー', isSemiconMain: true, weightPct: 0.57 },
+  { code: '69880', name: '日東電工', isSemiconMain: true, weightPct: 0.37 },
+  { code: '65040', name: '富士電機', isSemiconMain: true, weightPct: 0.32 },
+  { code: '69630', name: 'ローム', isSemiconMain: true, weightPct: 0.26 },
+  { code: '64790', name: 'ミネベアミツミ', isSemiconMain: true, weightPct: 0.23 },
+  { code: '66450', name: 'オムロン', isSemiconMain: true, weightPct: 0.18 },
+];
+
+// NOTE: display_order は 00109_basket_display_order.sql の値と一致させること
+// （既存9バスケットはマイグレーションのUPDATEで設定済み・physical-ai-2638=30 は本seedが投入する）。
 const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
   'nkscd-200a': {
     basketId: 'nkscd-200a',
@@ -143,6 +190,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
     metricsFrom: '2019-01-04',
     anchorDate: '2025-11-28',
     spotCheckCode: '80350',
+    displayOrder: 10,
     source: {
       kind: 'curated',
       capMain: 0.15,
@@ -160,7 +208,22 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'キャップ無し）。模擬指数は構成銘柄データが揃う最初の営業日にベンチマークETF(1615)の' +
       '実勢価格を基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
+    displayOrder: 20,
     source: { kind: 'sector33_auto', sector33Filter: '銀行業' },
+  },
+  'physical-ai-2638': {
+    basketId: 'physical-ai-2638',
+    displayName: 'フィジカルAI・ロボティクス (2638)',
+    benchmarkCode: '26380',
+    description:
+      'グローバルX ロボティクス＆AI-日本株式ETF(2638, Indxx Japan Robotics & AI Index連動)の' +
+      '構成銘柄をPCF実ウエート(2026-07-22時点)アンカー+時価総額連動ドリフトで模擬。浮動株調整・' +
+      '8%キャップはアンカーウエートに織込み済み。構成・ウエートは年1回程度PCFから手動更新する。',
+    metricsFrom: '2019-01-04',
+    anchorDate: '2026-07-22',
+    spotCheckCode: '69540',
+    displayOrder: 30,
+    source: { kind: 'curated_explicit', constituents: CONSTITUENTS_PHYSICAL_AI_2638 },
   },
   'topix33-transportequip-1622': {
     basketId: 'topix33-transportequip-1622',
@@ -172,6 +235,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'ETF(1622)のユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日に' +
       'ETF実勢価格を基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
+    displayOrder: 80,
     source: { kind: 'sector33_auto', sector33Filter: '輸送用機器' },
   },
   'topix33-wholesale-1629': {
@@ -184,6 +248,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
       '基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
+    displayOrder: 100,
     source: { kind: 'sector33_auto', sector33Filter: '卸売業' },
   },
   'topix33-realestate-1633': {
@@ -196,6 +261,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
       '基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
+    displayOrder: 60,
     source: { kind: 'sector33_auto', sector33Filter: '不動産業' },
   },
   'topix33-pharma-1621': {
@@ -208,6 +274,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
       '基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
+    displayOrder: 50,
     source: { kind: 'sector33_auto', sector33Filter: '医薬品' },
   },
   'topix33-machinery-1624': {
@@ -220,6 +287,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
       '基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
+    displayOrder: 40,
     source: { kind: 'sector33_auto', sector33Filter: '機械' },
   },
   'topix33-utilities-1627': {
@@ -233,6 +301,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'ETF実勢価格を基準として同一スケールで連結する。' +
       '注意: equity_master.sector33_name の実値は半角中点「電気･ガス業」（全角の電気・ガス業ではない）。',
     metricsFrom: '2019-01-04',
+    displayOrder: 90,
     source: { kind: 'sector33_auto', sector33Filter: '電気･ガス業' },
   },
   'topix33-retail-1630': {
@@ -245,6 +314,7 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
       'ユニバースと構成が一致する。模擬指数は構成銘柄データが揃う最初の営業日にETF実勢価格を' +
       '基準として同一スケールで連結する。',
     metricsFrom: '2019-01-04',
+    displayOrder: 70,
     source: { kind: 'sector33_auto', sector33Filter: '小売業' },
   },
 };
@@ -465,16 +535,19 @@ async function seedOneBasket(
   const { jq, core, analytics, batchUpsert, priceFrom, to, options } = deps;
   const source = config.source;
 
-  if (source.kind === 'curated' && to < config.anchorDate!) {
+  if (
+    (source.kind === 'curated' || source.kind === 'curated_explicit') &&
+    to < config.anchorDate!
+  ) {
     throw new Error(`--to (${to}) must be on/after anchor date ${config.anchorDate}`);
   }
   if (to < config.metricsFrom) {
     throw new Error(`--to (${to}) must be on/after metrics start ${config.metricsFrom}`);
   }
 
-  // ---------- Step 0: 構成銘柄の決定（curated=固定リスト / sector33_auto=equity_master 導出） ----------
+  // ---------- Step 0: 構成銘柄の決定（curated/curated_explicit=固定リスト / sector33_auto=equity_master 導出） ----------
   let constituents: ConstituentDef[];
-  if (source.kind === 'curated') {
+  if (source.kind === 'curated' || source.kind === 'curated_explicit') {
     constituents = source.constituents;
   } else {
     const codes = await fetchSector33Constituents(core, source.sector33Filter);
@@ -546,14 +619,14 @@ async function seedOneBasket(
   }
   const lastDate = dates[dates.length - 1];
 
-  // ---------- Step 4: ウエート係数（curated=水充填キャップ / sector33_auto=一律1） ----------
+  // ---------- Step 4: ウエート係数（curated=水充填キャップ / curated_explicit=実ウエート / sector33_auto=一律1） ----------
   // アンカー日/基準値の確定は日次集計の後（Step 5b）に行う。sector33_auto は「構成銘柄データが
   // 揃う最初の営業日」を基準にするため、先に集計結果が必要になる。
   const weightFactorByCode = new Map<string, number>();
   const officialWeightByCode = new Map<string, number | null>();
   let curatedAnchorLevel: number | null = null;
 
-  if (source.kind === 'curated') {
+  if (source.kind === 'curated' || source.kind === 'curated_explicit') {
     const anchorDateC = config.anchorDate!;
     const anchors: AnchorMcapInput[] = [];
     const missingAtAnchor: string[] = [];
@@ -571,16 +644,16 @@ async function seedOneBasket(
         code: def.code,
         mcap: close * (fy.sharesOutstanding / cum),
         isSemiconMain: def.isSemiconMain,
+        explicitWeightPct: def.weightPct,
       });
     }
     if (missingAtAnchor.length > 0) {
       throw new Error(`Anchor data missing for: ${missingAtAnchor.join(', ')}`);
     }
-    const sourceConfig: ConstituentSourceConfig = {
-      kind: 'curated',
-      capMain: source.capMain,
-      capOther: source.capOther,
-    };
+    const sourceConfig: ConstituentSourceConfig =
+      source.kind === 'curated'
+        ? { kind: 'curated', capMain: source.capMain, capOther: source.capOther }
+        : { kind: 'curated_explicit' };
     for (const r of resolveConstituentWeights(sourceConfig, anchors)) {
       weightFactorByCode.set(r.code, r.weightFactor);
       officialWeightByCode.set(r.code, r.officialWeight);
@@ -591,13 +664,15 @@ async function seedOneBasket(
     }
     curatedAnchorLevel = level;
 
-    console.log('Anchor weights (capped):');
+    console.log(
+      source.kind === 'curated' ? 'Anchor weights (capped):' : 'Anchor weights (explicit, PCF):'
+    );
     for (const def of constituents) {
       const weight = officialWeightByCode.get(def.code);
       const factor = weightFactorByCode.get(def.code)!;
       console.log(
         `  ${def.code} ${def.name}: weight=${weight?.toFixed(2)}% factor=${factor.toFixed(4)}` +
-          `${def.isSemiconMain ? '' : ' [cap5%]'}`
+          `${source.kind === 'curated' && !def.isSemiconMain ? ' [cap5%]' : ''}`
       );
     }
   } else {
@@ -652,15 +727,15 @@ async function seedOneBasket(
   }
 
   // ---------- Step 5b: 模擬指数のアンカーを確定 ----------
-  // curated は固定アンカー日 + ベンチマークETF実値。sector33_auto は公式指数が存在しないが、
-  // NAV軸（ETF実勢価格 vs 模擬指数の直接比較）が同一スケールで意味を持つよう、
-  // curatedと同じく**ベンチマークETFのadj_close**をアンカー値に使う（合成値1000は使わない。
-  // index_levelとetf_closeが別スケールだとcomputeNavAxisの乖離%が構造的に無意味になるため）。
-  // アンカー日は構成銘柄データ（価格+PIT）が揃う最初の営業日（先頭の財務未開示期間はカバレッジ0で
-  // 除外されるため、そこをアンカーにすると連結が始点で断絶する）。
+  // curated/curated_explicit は固定アンカー日 + ベンチマークETF実値。sector33_auto は
+  // 公式指数が存在しないが、NAV軸（ETF実勢価格 vs 模擬指数の直接比較）が同一スケールで意味を
+  // 持つよう、curatedと同じく**ベンチマークETFのadj_close**をアンカー値に使う（合成値1000は
+  // 使わない。index_levelとetf_closeが別スケールだとcomputeNavAxisの乖離%が構造的に無意味に
+  // なるため）。アンカー日は構成銘柄データ（価格+PIT）が揃う最初の営業日（先頭の財務未開示期間は
+  // カバレッジ0で除外されるため、そこをアンカーにすると連結が始点で断絶する）。
   let anchorDate: string;
   let anchorIndexLevel: number;
-  if (source.kind === 'curated') {
+  if (source.kind === 'curated' || source.kind === 'curated_explicit') {
     anchorDate = config.anchorDate!;
     anchorIndexLevel = curatedAnchorLevel!;
   } else {
@@ -732,7 +807,9 @@ async function seedOneBasket(
   const errors: Error[] = [];
   // sector33_auto は現行構成の観測日として run 日（=to）を valid_from にする
   // （refresh-sector-basket-constituents が新規追加時に valid_from=当日 とするのと整合）。
-  const constituentValidFrom = source.kind === 'curated' ? anchorDate : to;
+  // curated_explicit も curated と同じくアンカー日基準（年1回程度の手動更新・自動リフレッシュ対象外）。
+  const constituentValidFrom =
+    source.kind === 'curated' || source.kind === 'curated_explicit' ? anchorDate : to;
   if (!options.dryRun) {
     const { error: defError } = await analytics.from('basket_definitions').upsert(
       {
@@ -742,8 +819,12 @@ async function seedOneBasket(
         description: config.description,
         anchor_date: anchorDate,
         anchor_index_level: round(anchorIndexLevel, 4),
-        constituent_source: source.kind,
+        // DB制約(00106)は 'curated' | 'sector33_auto' の2値のみ。curated_explicit は
+        // ウエート算出方法（seed内部）の違いに過ぎず、運用上（手動更新・sector33自動リフレッシュ
+        // 対象外）は curated と同じ扱いのため 'curated' として保存する。
+        constituent_source: source.kind === 'sector33_auto' ? 'sector33_auto' : 'curated',
         sector33_filter: source.kind === 'sector33_auto' ? source.sector33Filter : null,
+        display_order: config.displayOrder,
         updated_at: nowIso,
       },
       { onConflict: 'basket_id' }
