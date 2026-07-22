@@ -334,6 +334,75 @@ describe('resolveConstituentWeights', () => {
       { code: '83160', weightFactor: 1, officialWeight: null },
     ]);
   });
+
+  describe('curated_explicit', () => {
+    const explicitAnchor = (
+      code: string,
+      mcap: number,
+      explicitWeightPct: number
+    ): AnchorMcapInput => ({ code, mcap, isSemiconMain: true, explicitWeightPct });
+
+    it('official_weight は入力ウエートをそのまま返し（合計100なら無変換）、' +
+      'weight_factor = (W/100) / mcapShare', () => {
+      // A: mcap share 60%・実ウエート40% / B: mcap share 40%・実ウエート60%
+      const resolved = resolveConstituentWeights(
+        { kind: 'curated_explicit' },
+        [explicitAnchor('A', 60, 40), explicitAnchor('B', 40, 60)]
+      );
+      const byCode = new Map(resolved.map((r) => [r.code, r]));
+      expect(byCode.get('A')!.officialWeight).toBeCloseTo(40);
+      expect(byCode.get('A')!.weightFactor).toBeCloseTo(0.4 / 0.6);
+      expect(byCode.get('B')!.officialWeight).toBeCloseTo(60);
+      expect(byCode.get('B')!.weightFactor).toBeCloseTo(0.6 / 0.4);
+    });
+
+    it('入力ウエート合計が100でなければ合計100へ再正規化する', () => {
+      // 入力合計 99.98（2638のPCF実ウエート合計相当）→ 各値を ×(100/99.98) して合計100にする
+      const resolved = resolveConstituentWeights(
+        { kind: 'curated_explicit' },
+        [explicitAnchor('A', 50, 33.32), explicitAnchor('B', 50, 66.66)]
+      );
+      const sum = resolved.reduce((s, r) => s + (r.officialWeight ?? 0), 0);
+      expect(sum).toBeCloseTo(100);
+      const byCode = new Map(resolved.map((r) => [r.code, r]));
+      expect(byCode.get('A')!.officialWeight).toBeCloseTo((33.32 / 99.98) * 100);
+    });
+
+    it('キャップ計算はしない（mcapシェアが極端に偏っていても実ウエート通りfactorを返す）', () => {
+      // A: mcap share 95%・実ウエート10%（大幅underweight）でもキャップで頭打ちしない
+      const resolved = resolveConstituentWeights(
+        { kind: 'curated_explicit' },
+        [explicitAnchor('A', 95, 10), explicitAnchor('B', 5, 90)]
+      );
+      const byCode = new Map(resolved.map((r) => [r.code, r]));
+      expect(byCode.get('A')!.officialWeight).toBeCloseTo(10);
+      expect(byCode.get('B')!.officialWeight).toBeCloseTo(90);
+    });
+
+    it('アンカー時価総額合計が0以下はエラー', () => {
+      expect(() =>
+        resolveConstituentWeights({ kind: 'curated_explicit' }, [explicitAnchor('A', 0, 100)])
+      ).toThrow();
+    });
+
+    it('個別銘柄のアンカー時価総額が0以下はエラー（mcap欠損時の防御）', () => {
+      expect(() =>
+        resolveConstituentWeights(
+          { kind: 'curated_explicit' },
+          [explicitAnchor('A', 100, 50), explicitAnchor('B', 0, 50)]
+        )
+      ).toThrow();
+    });
+
+    it('実ウエート合計が0以下はエラー', () => {
+      expect(() =>
+        resolveConstituentWeights(
+          { kind: 'curated_explicit' },
+          [explicitAnchor('A', 100, 0), explicitAnchor('B', 100, 0)]
+        )
+      ).toThrow();
+    });
+  });
 });
 
 describe('effectiveCoverageWeight', () => {

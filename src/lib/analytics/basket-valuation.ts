@@ -324,33 +324,42 @@ export function waterFillCap(inputs: CapInput[]): Map<string, number> {
 /**
  * バスケットの構成銘柄・ウエート係数の決定方法。
  * - curated: 手動キュレーション（200A）。アンカー日の時価総額シェアに機械キャップ（水充填）を適用。
+ * - curated_explicit: 手動キュレーション + 明示ウエート（2638等・ETFのPCF実ウエート転記）。
+ *   公式ウエート%をそのまま使用し、機械キャップ計算はしない（実ウエートに織込み済みのため）。
  * - sector33_auto: TOPIX-33業種の自動導出（銀行業等）。キャップ無し＝時価総額シェアそのものが
  *   ウエートのため weight_factor は全銘柄一律1・official_weight は null に単純化する。
  */
 export type ConstituentSourceConfig =
   | { kind: 'curated'; capMain: number; capOther: number }
+  | { kind: 'curated_explicit' }
   | { kind: 'sector33_auto' };
 
 /** アンカー日の時価総額（resolveConstituentWeights の入力・1銘柄分） */
 export interface AnchorMcapInput {
   code: string;
-  /** アンカー日時価総額（curated のキャップ配分のみに使用）。sector33_auto では無視 */
+  /** アンカー日時価総額（curated/curated_explicit のウエート配分に使用）。sector33_auto では無視 */
   mcap: number;
-  /** 半導体主業か（curated のキャップ枠選択にのみ使用）。sector33_auto では無視 */
+  /** 半導体主業か（curated のキャップ枠選択にのみ使用）。curated_explicit/sector33_auto では無視 */
   isSemiconMain: boolean;
+  /**
+   * 公式ウエート%（curated_explicit のみ使用。ETFのPCF等から転記した実ウエート）。
+   * 合計は呼び出し側でおおよそ100想定だが、関数内で合計=100へ再正規化するため厳密一致は不要。
+   * curated/sector33_auto では無視。
+   */
+  explicitWeightPct?: number;
 }
 
 /** basket_constituents に投入するウエート係数（1銘柄分） */
 export interface ResolvedConstituentWeight {
   code: string;
-  /** 公式（機械キャップ）ウエート ÷ アンカー日時価総額シェア。sector33_auto は 1 */
+  /** 公式（機械キャップ or 実ウエート）÷ アンカー日時価総額シェア。sector33_auto は 1 */
   weightFactor: number;
-  /** アンカー日の公式ウエート%（curated のみ）。sector33_auto は null */
+  /** アンカー日の公式ウエート%（curated/curated_explicit のみ）。sector33_auto は null */
   officialWeight: number | null;
 }
 
 /**
- * 構成銘柄のウエート係数を決定方法（curated / sector33_auto）に応じて算出する。
+ * 構成銘柄のウエート係数を決定方法（curated / curated_explicit / sector33_auto）に応じて算出する。
  * seed（バックフィル）の初回投入と refresh-sector-basket-constituents（日次差分）で共有する。
  */
 export function resolveConstituentWeights(
@@ -362,6 +371,34 @@ export function resolveConstituentWeights(
     // weight_factor=1（日次 w_i(t)=mcap_i/Σmcap がそのまま公式ウエートに一致）。
     return anchors.map((a) => ({ code: a.code, weightFactor: 1, officialWeight: null }));
   }
+
+  if (config.kind === 'curated_explicit') {
+    // ETFのPCF等から転記した実ウエート%をそのまま使用（機械キャップ計算はしない。
+    // 浮動株調整・個別上限は実ウエートに既に織込み済みのため）。
+    // weight_factor_i = (W_i/100) / (mcap_i/Σmcap)。合計が概ね100でも厳密100でなくても
+    // 内部で合計=100へ再正規化してから factor を求める。
+    const totalMcap = anchors.reduce((s, a) => s + a.mcap, 0);
+    if (totalMcap <= 0) {
+      throw new Error('resolveConstituentWeights: total anchor mcap must be positive');
+    }
+    const totalWeightPct = anchors.reduce((s, a) => s + (a.explicitWeightPct ?? 0), 0);
+    if (totalWeightPct <= 0) {
+      throw new Error('resolveConstituentWeights: total explicit weight must be positive');
+    }
+    return anchors.map((a) => {
+      const mcapShare = a.mcap / totalMcap;
+      if (mcapShare <= 0) {
+        throw new Error(`resolveConstituentWeights: anchor mcap must be positive for ${a.code}`);
+      }
+      const renormalizedPct = ((a.explicitWeightPct ?? 0) / totalWeightPct) * 100;
+      return {
+        code: a.code,
+        weightFactor: renormalizedPct / 100 / mcapShare,
+        officialWeight: renormalizedPct,
+      };
+    });
+  }
+
   const total = anchors.reduce((s, a) => s + a.mcap, 0);
   if (total <= 0) throw new Error('resolveConstituentWeights: total anchor mcap must be positive');
   const capInputs: CapInput[] = anchors.map((a) => ({
