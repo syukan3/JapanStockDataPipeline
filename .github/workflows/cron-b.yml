@@ -43,3 +43,12 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"job": "cron_b", "workflow_run_id": "${{ github.run_id }}"}' \
             --silent --show-error --max-time 30 || true
+
+      # Portfolio(cachedRef/unstable_cache, TTL=1h)の参照データキャッシュを即時失効させる。
+      # ベストエフォート: 失敗してもCron B本体は成功扱いのまま（TTL失効が保険として残る）。
+      - name: Notify Portfolio - revalidate reference cache
+        if: success()
+        run: |
+          curl -X POST "${{ secrets.PORTFOLIO_URL }}/api/internal/revalidate-reference" \
+            -H "Authorization: Bearer ${{ secrets.INTERNAL_REVALIDATE_SECRET }}" \
+            --silent --show-error --max-time 30 || true
