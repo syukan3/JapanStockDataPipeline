@@ -33,3 +33,12 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
         run: npx tsx scripts/cron/cron-f-direct.ts
+
+      # Portfolio(cachedRef/unstable_cache, TTL=1h)の参照データキャッシュを即時失効させる。
+      # ベストエフォート: 失敗してもCron F本体は成功扱いのまま（TTL失効が保険として残る）。
+      - name: Notify Portfolio - revalidate reference cache
+        if: success()
+        run: |
+          curl -X POST "${{ secrets.PORTFOLIO_URL }}/api/internal/revalidate-reference" \
+            -H "Authorization: Bearer ${{ secrets.INTERNAL_REVALIDATE_SECRET }}" \
+            --silent --show-error --max-time 30 || true
