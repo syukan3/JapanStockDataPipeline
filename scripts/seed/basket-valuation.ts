@@ -317,6 +317,53 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
     displayOrder: 70,
     source: { kind: 'sector33_auto', sector33Filter: '小売業' },
   },
+  // ------------------------------------------------------------
+  // 波及ラダー用バスケット（論者レンズ ak-02。docs/PLANS-thesis-lens-2026-07.md §5）
+  // 半導体(200A) → 電気機器 → 化学/機械 → 輸送用機器 → 食料品/小売 → コアCPI/BEI
+  // の各段を測るために追加した3種。display_order は 00109 の既存9件に続けて採番する
+  // （新規行のため 00109 のような UPDATE マイグレーションは不要。本seedのupsertが投入する）。
+  // 共通の注意: いずれもベンチマークETFはTOPIX-17区分で33業種と1:1ではない。
+  // ETF価格はスケール基準と参考値としてのみ使い、命題採点には模擬指数 index_level を使う。
+  // ------------------------------------------------------------
+  'topix33-elec-1625': {
+    basketId: 'topix33-elec-1625',
+    displayName: '電気機器 (1625)',
+    benchmarkCode: '16250',
+    description:
+      'TOPIX-33業種「電気機器」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。注意: ベンチマークETF(1625)のTOPIX-17「電機・精密」は電気機器＋精密機器の' +
+      '2区分を含むため33業種の電気機器単独とは1:1で一致しない。ETF実勢価格はアンカー日のスケール' +
+      '基準および参考値としてのみ使い、比較には模擬指数(index_level)を使う。',
+    metricsFrom: '2019-01-04',
+    displayOrder: 110,
+    source: { kind: 'sector33_auto', sector33Filter: '電気機器' },
+  },
+  'topix33-chemical-1620': {
+    basketId: 'topix33-chemical-1620',
+    displayName: '化学 (1620)',
+    benchmarkCode: '16200',
+    description:
+      'TOPIX-33業種「化学」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。注意: ベンチマークETF(1620)のTOPIX-17「素材・化学」は化学に加えて繊維製品・' +
+      'パルプ紙・ガラス土石等を含むため33業種の化学単独とは1:1で一致しない。ETF実勢価格はアンカー日の' +
+      'スケール基準および参考値としてのみ使い、比較には模擬指数(index_level)を使う。',
+    metricsFrom: '2019-01-04',
+    displayOrder: 120,
+    source: { kind: 'sector33_auto', sector33Filter: '化学' },
+  },
+  'topix33-foods-1617': {
+    basketId: 'topix33-foods-1617',
+    displayName: '食料品 (1617)',
+    benchmarkCode: '16170',
+    description:
+      'TOPIX-33業種「食料品」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。注意: ベンチマークETF(1617)のTOPIX-17「食品」は食料品＋水産・農林業を含むため' +
+      '33業種の食料品単独とは1:1で一致しない。ETF実勢価格はアンカー日のスケール基準および参考値として' +
+      'のみ使い、比較には模擬指数(index_level)を使う。',
+    metricsFrom: '2019-01-04',
+    displayOrder: 130,
+    source: { kind: 'sector33_auto', sector33Filter: '食料品' },
+  },
 };
 
 const DEFAULT_BASKET_ID = 'nkscd-200a';
