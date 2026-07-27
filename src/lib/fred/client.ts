@@ -18,6 +18,17 @@ const BASE_URL = 'https://api.stlouisfed.org/fred';
 /** FRED欠損値マーカー */
 const MISSING_VALUE = '.';
 
+/**
+ * ALFRED ヴィンテージ指定の下限/上限。
+ * FRED の output_type は realtime_start が指定されている場合のみ有効なので、
+ * 「全期間の初回リリース」を取るにはこの範囲と組で送る必要がある。
+ */
+const ALFRED_MIN_REALTIME = '1776-07-04';
+const ALFRED_MAX_REALTIME = '9999-12-31';
+
+/** output_type=4: Observations, Initial Release Only */
+const OUTPUT_TYPE_INITIAL_RELEASE = 4;
+
 export interface FredClientOptions {
   /** API キー（省略時は環境変数 FRED_API_KEY を使用） */
   apiKey?: string;
@@ -133,19 +144,35 @@ export class FredClient {
    * @param seriesId FRED series ID (例: 'VIXCLS')
    * @param observationStart 取得開始日 (YYYY-MM-DD)
    * @param observationEnd 取得終了日 (YYYY-MM-DD)
+   * @param options.initialRelease true で ALFRED の「初回リリースのみ」を取得する。
+   *   既定（false）は最新ヴィンテージを返すため、**過去分を取得すると全観測の
+   *   realtime_start が「取得時点」になり released_at が公表日にならない**
+   *   （バックフィル済みデータで point-in-time 検証ができなくなる実害があった）。
+   *   FRED の output_type は realtime_start を併用しないと無視される仕様のため、
+   *   realtime_start=1776-07-04 / realtime_end=9999-12-31 と組で送る。
    * @returns パース済み観測値（欠損値 "." はスキップ済み）
    */
   async getSeriesObservations(
     seriesId: string,
     observationStart?: string,
-    observationEnd?: string
+    observationEnd?: string,
+    options?: { initialRelease?: boolean }
   ): Promise<{ observations: ParsedFredObservation[]; skippedCount: number }> {
+    const vintageParams = options?.initialRelease
+      ? {
+          realtime_start: ALFRED_MIN_REALTIME,
+          realtime_end: ALFRED_MAX_REALTIME,
+          output_type: OUTPUT_TYPE_INITIAL_RELEASE,
+        }
+      : {};
+
     const response = await this.request<FredObservationsResponse>(
       '/series/observations',
       {
         series_id: seriesId,
         observation_start: observationStart,
         observation_end: observationEnd,
+        ...vintageParams,
       }
     );
 

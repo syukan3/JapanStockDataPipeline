@@ -105,6 +105,59 @@ describe('fred/client.ts', () => {
       expect(skippedCount).toBe(0);
     });
 
+    it('既定ではヴィンテージ指定を送らない（最新ヴィンテージ）', async () => {
+      mockFetchWithRetry.mockResolvedValue({
+        json: vi.fn().mockResolvedValue({ observations: [] }),
+      });
+
+      const client = new FredClient();
+      await client.getSeriesObservations('VIXCLS', '2016-01-01');
+
+      const url = String(mockFetchWithRetry.mock.calls[0][0]);
+      expect(url).toContain('observation_start=2016-01-01');
+      expect(url).not.toContain('output_type');
+      expect(url).not.toContain('realtime_start');
+    });
+
+    it('initialRelease=true で ALFRED 初回リリースのパラメータを送る', async () => {
+      mockFetchWithRetry.mockResolvedValue({
+        json: vi.fn().mockResolvedValue({ observations: [] }),
+      });
+
+      const client = new FredClient();
+      await client.getSeriesObservations('UNRATE', '2016-01-01', undefined, {
+        initialRelease: true,
+      });
+
+      const url = String(mockFetchWithRetry.mock.calls[0][0]);
+      // output_type は realtime_start と組でないと FRED 側で無視される
+      expect(url).toContain('output_type=4');
+      expect(url).toContain('realtime_start=1776-07-04');
+      expect(url).toContain('realtime_end=9999-12-31');
+    });
+
+    it('initialRelease=true でも realtime_start を公表日として取り込む', async () => {
+      mockFetchWithRetry.mockResolvedValue({
+        json: vi.fn().mockResolvedValue({
+          observations: [
+            // 2016-01 の失業率が実際に公表されたのは 2016-02-05
+            { date: '2016-01-01', value: '4.9', realtime_start: '2016-02-05' },
+          ],
+        }),
+      });
+
+      const client = new FredClient();
+      const { observations } = await client.getSeriesObservations(
+        'UNRATE', '2016-01-01', undefined, { initialRelease: true },
+      );
+
+      expect(observations[0]).toEqual({
+        date: '2016-01-01',
+        value: 4.9,
+        releasedAt: '2016-02-05T00:00:00Z',
+      });
+    });
+
     it('欠損値 "." をスキップする', async () => {
       mockFetchWithRetry.mockResolvedValue({
         json: vi.fn().mockResolvedValue({

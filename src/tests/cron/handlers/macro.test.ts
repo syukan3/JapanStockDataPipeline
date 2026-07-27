@@ -197,10 +197,68 @@ describe('cron/handlers/macro.ts', () => {
 
       await handleCronD('fred', 'run-123', 30);
 
-      // getSeriesObservationsの第2引数が30日前の日付であることを確認
+      // 第2引数が30日前の日付、かつバックフィルなので初回リリース指定が付く
       expect(mockFredClient.getSeriesObservations).toHaveBeenCalledWith(
         'VIXCLS',
-        expect.any(String) // 日付文字列
+        expect.any(String), // 日付文字列
+        undefined,
+        { initialRelease: true }
+      );
+    });
+
+    it('バックフィル時は ALFRED 初回リリースで取得する（released_at を公表日にするため）', async () => {
+      const fredSeries = [{
+        series_id: 'unrate',
+        source: 'fred',
+        source_series_id: 'UNRATE',
+        source_filter: null,
+        frequency: 'monthly',
+        last_value_date: '2024-01-10',
+      }];
+
+      setupSupabaseMock(fredSeries);
+      mockFredClient.getSeriesObservations.mockResolvedValue({
+        observations: [{ date: '2016-01-01', value: 4.9, releasedAt: '2016-02-05T00:00:00Z' }],
+        skippedCount: 0,
+      });
+
+      await handleCronD('fred', 'run-123', 3800);
+
+      expect(mockFredClient.getSeriesObservations).toHaveBeenCalledWith(
+        'UNRATE',
+        expect.any(String),
+        undefined,
+        { initialRelease: true }
+      );
+      // 初回リリースが取れたらフォールバックしない
+      expect(mockFredClient.getSeriesObservations).toHaveBeenCalledTimes(1);
+    });
+
+    it('初回リリースが空なら通常取得へフォールバックする', async () => {
+      const fredSeries = [{
+        series_id: 'vixcls',
+        source: 'fred',
+        source_series_id: 'VIXCLS',
+        source_filter: null,
+        frequency: 'daily',
+        last_value_date: '2024-01-10',
+      }];
+
+      setupSupabaseMock(fredSeries);
+      mockFredClient.getSeriesObservations
+        .mockResolvedValueOnce({ observations: [], skippedCount: 0 })
+        .mockResolvedValueOnce({
+          observations: [{ date: '2016-01-04', value: 20.7, releasedAt: '2026-07-27T00:00:00Z' }],
+          skippedCount: 0,
+        });
+
+      await handleCronD('fred', 'run-123', 3800);
+
+      expect(mockFredClient.getSeriesObservations).toHaveBeenCalledTimes(2);
+      // 2回目はヴィンテージ指定なしの通常取得
+      expect(mockFredClient.getSeriesObservations).toHaveBeenLastCalledWith(
+        'VIXCLS',
+        expect.any(String)
       );
     });
 
@@ -266,9 +324,12 @@ describe('cron/handlers/macro.ts', () => {
 
       await handleCronD('fred', 'run-123');
 
+      // 日次差分は最新ヴィンテージで正しい（今日公表された値の realtime_start は今日）
       expect(mockFredClient.getSeriesObservations).toHaveBeenCalledWith(
         'VIXCLS',
-        '2024-01-10'
+        '2024-01-10',
+        undefined,
+        undefined
       );
     });
 

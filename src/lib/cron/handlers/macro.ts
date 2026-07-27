@@ -105,10 +105,31 @@ async function processFredSeries(
         observationStart,
       });
 
-      const { observations, skippedCount } = await fredClient.getSeriesObservations(
+      // 明示的バックフィル時は ALFRED の「初回リリースのみ」を取る。
+      // 既定の最新ヴィンテージで過去分を取ると全観測の realtime_start が取得時点になり、
+      // released_at が公表日にならず point-in-time 検証ができなくなるため
+      // （実際に 2026-02 のバックフィル分が全て released_at=取込時刻になっていた）。
+      // 日次の差分取得は「今日公表された値の realtime_start は今日」で正しいので従来通り。
+      const useInitialRelease = backfillDays > 0;
+
+      let { observations, skippedCount } = await fredClient.getSeriesObservations(
         series.source_series_id,
-        observationStart
+        observationStart,
+        undefined,
+        useInitialRelease ? { initialRelease: true } : undefined
       );
+
+      // ヴィンテージ非対応の系列で空が返る場合に備え、通常取得へフォールバックする
+      // （値が入らないよりは released_at が不正確でも入る方がまし）
+      if (useInitialRelease && observations.length === 0) {
+        logger.warn('Initial-release fetch returned no observations, falling back', {
+          seriesId: series.series_id,
+        });
+        ({ observations, skippedCount } = await fredClient.getSeriesObservations(
+          series.source_series_id,
+          observationStart
+        ));
+      }
 
       totalSkipped += skippedCount;
 
