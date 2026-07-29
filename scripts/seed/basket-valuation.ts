@@ -364,6 +364,25 @@ const BASKET_CONFIGS: Record<string, BasketSeedConfig> = {
     displayOrder: 130,
     source: { kind: 'sector33_auto', sector33Filter: '食料品' },
   },
+
+  // ------------------------------------------------------------
+  // 論者レンズ em-04（エミン: AI一極集中の反動で基盤産業へ資金が回帰する）用。
+  // 本人が挙げる「防衛」は TOPIX-33 に該当区分がなく銘柄の手選定になるため作らない。
+  // 測れるのは鉄鋼のみで、命題もその範囲に限定する（docs/PLANS-thesis-lens-2026-07.md §9-3）。
+  // ------------------------------------------------------------
+  'topix33-steel-1623': {
+    basketId: 'topix33-steel-1623',
+    displayName: '鉄鋼 (1623)',
+    benchmarkCode: '16230',
+    description:
+      'TOPIX-33業種「鉄鋼」の現行上場銘柄を時価総額加重で模擬（equity_master から自動導出・' +
+      'キャップ無し）。注意: ベンチマークETF(1623)のTOPIX-17「鉄鋼・非鉄」は鉄鋼＋非鉄金属の' +
+      '2区分を含むため33業種の鉄鋼単独とは1:1で一致しない。ETF実勢価格はアンカー日のスケール' +
+      '基準および参考値としてのみ使い、比較には模擬指数(index_level)を使う。',
+    metricsFrom: '2019-01-04',
+    displayOrder: 140,
+    source: { kind: 'sector33_auto', sector33Filter: '鉄鋼' },
+  },
 };
 
 const DEFAULT_BASKET_ID = 'nkscd-200a';
