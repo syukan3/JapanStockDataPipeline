@@ -155,12 +155,31 @@ jobs:
       # その前提となる equity_bars/financial/rebase の成功を推移的に保証するため
       # （basket_definitions が未投入の間は0件検出で正常終了する）。
       - name: Refresh basket metrics (analytics.basket_metrics)
+        id: refresh_basket_metrics
         if: always() && steps.refresh_stock_metrics.outcome == 'success'
         continue-on-error: true
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/refresh-basket-metrics.ts
+
+      # /baskets ボトムアップ軸のPERバンド事前計算（analytics.bottomup_per_bands、00117）。
+      # クエリ時集計はDB CPU的に成立しなかった（statement timeout）ため、Cron A で日次全置換する。
+      # ゲート条件は basket metrics と同じ（equity_bars/financial/rebase の成功を推移的に保証）。
+      # 構成銘柄の入替（上の constituents ステップ）より後に置くこと。
+      # 失敗しても Portfolio 側は鮮度ガード（5日）内なら前日の事前計算で動き、
+      # それを超えるとTS経路（遅いが正しい）へ自動フォールバックする。
+      - name: Refresh bottomup PER bands (analytics.bottomup_per_bands)
+        if: always() && steps.refresh_stock_metrics.outcome == 'success'
+        continue-on-error: true
+        run: |
+          curl -X POST "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}/rest/v1/rpc/refresh_bottomup_per_bands" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Profile: analytics" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --fail --silent --show-error --max-time 300
 
       # 市場全体指標（analytics.market_indicators）を forward-fill 更新。
       # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま。
