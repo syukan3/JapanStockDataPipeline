@@ -20,6 +20,10 @@ const rpcRollback = readFileSync(
   resolve(process.cwd(), 'supabase/rollbacks/00114_analyst_rating_history_rpc.down.sql'),
   'utf8'
 );
+const alphanumericMigration = readFileSync(
+  resolve(process.cwd(), 'supabase/migrations/00119_local_code_alphanumeric.sql'),
+  'utf8'
+);
 
 describe('00113_create_analyst_rating_history.sql', () => {
   it('event fingerprintをPKにして再収集を1行へ収束させる', () => {
@@ -29,6 +33,7 @@ describe('00113_create_analyst_rating_history.sql', () => {
   });
 
   it('価格・コード・出典URLの妥当性をDB側でも縛る', () => {
+    // 00113 時点の条件。英字入りコード対応で 00119 が上書きしている（下の describe）
     expect(tableMigration).toContain("CHECK (local_code ~ '^\\d{5}$')");
     expect(tableMigration).toContain('target_price          NUMERIC(12,2) NOT NULL CHECK (target_price > 0)');
     expect(tableMigration).toContain("source_url ~ '^https://'");
@@ -109,5 +114,23 @@ describe('00114_analyst_rating_history_rpc.sql', () => {
 
   it('rollbackは関数を落とす', () => {
     expect(rpcRollback).toContain('DROP FUNCTION IF EXISTS scouter.record_analyst_rating_history');
+  });
+});
+
+describe('00119_local_code_alphanumeric.sql', () => {
+  it('英字入り銘柄コード(285A0)を通すCHECKへ緩める', () => {
+    // JPX の新形式は4桁目だけが英字。旧条件 '^\d{5}$' / '^[0-9]{4,5}$' の上位集合に留める
+    expect(alphanumericMigration).toContain("CHECK (local_code ~ '^[0-9]{3}[0-9A-Z][0-9]$')");
+    expect(alphanumericMigration).toContain("CHECK (local_code ~ '^[0-9]{3}[0-9A-Z][0-9]?$')");
+  });
+
+  it('外部検索予約RPCのguardも同時に緩める', () => {
+    expect(alphanumericMigration).toContain("p_local_code !~ '^[0-9]{3}[0-9A-Z][0-9]?$'");
+  });
+
+  it('小文字・4桁目以外の英字は通さない条件になっている', () => {
+    expect('285A0').toMatch(/^[0-9]{3}[0-9A-Z][0-9]$/);
+    expect('285a0').not.toMatch(/^[0-9]{3}[0-9A-Z][0-9]$/);
+    expect('2A5A0').not.toMatch(/^[0-9]{3}[0-9A-Z][0-9]$/);
   });
 });

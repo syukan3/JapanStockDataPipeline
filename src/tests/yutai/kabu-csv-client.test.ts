@@ -119,4 +119,24 @@ abc,テスト
     const result = parseMarginInventoryCsv(csv, inventoryDate);
     expect(result[0].local_code).toBe('29140');
   });
+
+  it('4桁目が英字の新形式コードを扱う（285A / 285A0 / 小文字）', () => {
+    const csv = `コード,銘柄名
+285A,キオクシアホールディングス
+285A0,キオクシアホールディングス
+285a,キオクシアホールディングス`;
+
+    const result = parseMarginInventoryCsv(csv, inventoryDate);
+    expect(result.map((r) => r.local_code)).toEqual(['285A0', '285A0', '285A0']);
+  });
+
+  it('英字が4桁目以外にあるコードはスキップ', () => {
+    const csv = `コード,銘柄名
+2A5A0,不正
+2914,JT`;
+
+    const result = parseMarginInventoryCsv(csv, inventoryDate);
+    expect(result).toHaveLength(1);
+    expect(result[0].local_code).toBe('29140');
+  });
 });

@@ -81,8 +81,9 @@ function getSymbolsFromFile(filePath: string): string[] {
   const content = fs.readFileSync(filePath, 'utf-8');
   return content
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^\d{4}$/.test(line));
+    .map((line) => line.trim().toUpperCase())
+    // 4桁目は英字になり得る（例: キオクシア 285A）
+    .filter((line) => /^\d{3}[0-9A-Z]$/.test(line));
 }
 
 async function main(): Promise<void> {

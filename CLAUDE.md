@@ -36,6 +36,7 @@
 - Vercel 10秒制限があるため重い処理は GH Actions ランナーで tsx 直接実行
 - J-Quants は 60req/min（トークンバケット）。Pooler は Advisory Lock 不可 → TTL付きテーブルロック
 - Cron A の equity_bars 失敗時はゲートで factor/technical がスキップされる → 復旧後に手動再計算
+- 銘柄コード（`local_code`）を数字だけで縛らない。JPX 新形式は4桁目が英字（例: キオクシア 285A → `285A0`）。CHECK は `^[0-9]{3}[0-9A-Z][0-9]$`（5文字）/ `^[0-9]{3}[0-9A-Z][0-9]?$`（4-5文字）に揃える（00119）
 
 ## コマンド
 

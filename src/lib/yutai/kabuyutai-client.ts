@@ -68,11 +68,12 @@ export function estimateCategory(content: string): string | null {
 /**
  * HTMLテキストから銘柄コード（4桁 or 5桁）を抽出
  * 全角括弧 （1234） または半角括弧 (1234) に対応
+ * JPX新形式は4桁目が英字（例: キオクシア （285A) → 285A0）
  */
 function extractLocalCode(text: string): string | null {
-  const match = text.match(/[（(](\d{4,5})[）)]/);
+  const match = text.match(/[（(]([0-9]{3}[0-9A-Za-z][0-9]?)[）)]/);
   if (!match) return null;
-  const code = match[1];
+  const code = match[1].toUpperCase();
   return code.length === 4 ? code + '0' : code;
 }
 

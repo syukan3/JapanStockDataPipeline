@@ -54,11 +54,16 @@ export function parseCsvLines(csvText: string): string[][] {
 }
 
 /**
- * 銘柄コードを5桁に正規化
+ * 銘柄コードを5桁に正規化する。形式を満たさない値は null（行ごとスキップ）。
+ * JPX新形式は4桁目が英字（例: キオクシア 285A → 285A0）なので、数字以外を
+ * 除去する正規化はしない（英字が落ちて別銘柄のコードになるため）。
  */
-function normalizeCode(code: string): string {
-  const digits = code.replace(/[^\d]/g, '');
-  return digits.length === 4 ? digits + '0' : digits;
+function normalizeCode(code: string): string | null {
+  // \s は全角スペース(U+3000)も含む
+  const cleaned = code.replace(/["'\s]/g, '').toUpperCase();
+  if (/^[0-9]{3}[0-9A-Z][0-9]$/.test(cleaned)) return cleaned;
+  if (/^[0-9]{3}[0-9A-Z]$/.test(cleaned)) return `${cleaned}0`;
+  return null;
 }
 
 /**
@@ -94,9 +99,10 @@ export function parseMarginInventoryCsv(
     if (cells.length <= codeIdx) continue;
 
     const rawCode = cells[codeIdx];
-    if (!rawCode || !/\d{4,5}/.test(rawCode)) continue;
+    if (!rawCode) continue;
 
     const localCode = normalizeCode(rawCode);
+    if (!localCode) continue;
 
     // 在庫数量
     let inventoryQty: number | null = null;

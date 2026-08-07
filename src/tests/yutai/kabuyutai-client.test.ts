@@ -89,6 +89,30 @@ describe('parseYutaiListPage', () => {
     });
   });
 
+  it('4桁目が英字の新形式コードを5桁化する（285A → 285A0）', () => {
+    const html = makeEntry('285A', 'キオクシアホールディングス', '自社製品');
+    const results = parseYutaiListPage(html, 6);
+    expect(results).toHaveLength(1);
+    expect(results[0].local_code).toBe('285A0');
+  });
+
+  it('新形式の5桁表記はそのまま使う（285A0）', () => {
+    const html = makeEntry('285A0', 'キオクシアホールディングス', '自社製品');
+    const results = parseYutaiListPage(html, 6);
+    expect(results[0].local_code).toBe('285A0');
+  });
+
+  it('小文字の英字は大文字へ寄せる（285a → 285A0）', () => {
+    const html = makeEntry('285a', 'キオクシアホールディングス', '自社製品');
+    const results = parseYutaiListPage(html, 6);
+    expect(results[0].local_code).toBe('285A0');
+  });
+
+  it('英字が4桁目以外にあるコードのエントリはスキップ', () => {
+    const html = makeEntry('2A5A', '不正', '自社製品');
+    expect(parseYutaiListPage(html, 6)).toHaveLength(0);
+  });
+
   it('複数エントリをパース', () => {
     const html = makeEntry('2914', 'JT', '食品 2,500円相当')
       + makeEntry('8591', 'オリックス', 'カタログギフト');
