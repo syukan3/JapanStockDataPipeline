@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://japanstock.local/contracts/macro-pair-rotation-v1.schema.json",
+  "title": "Macro Pair Rotation Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractHash",
+    "strategyVersion",
+    "reportPeriodDate",
+    "asOfDate",
+    "comparisonDate",
+    "informationCutoffAt",
+    "generatedAt",
+    "summary",
+    "axes",
+    "caveats"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "contractHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "strategyVersion": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "reportPeriodDate": { "$ref": "#/$defs/date" },
+    "asOfDate": { "$ref": "#/$defs/date" },
+    "comparisonDate": { "$ref": "#/$defs/date" },
+    "informationCutoffAt": { "$ref": "#/$defs/dateTime" },
+    "generatedAt": { "$ref": "#/$defs/dateTime" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "axes": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/axis" }
+    },
+    "caveats": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+    }
+  },
+  "$defs": {
+    "date": {
+      "$comment": "patternに加えformat=dateで暦日の実在も要求する（2026-02-30を弾く）。schema validatorはformat assertionを有効にして使うこと。",
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "dateTime": { "type": "string", "format": "date-time" },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetDate", "indicatorDate", "value", "releasedAt", "updatedAt", "observedAt"],
+      "properties": {
+        "targetDate": { "$ref": "#/$defs/date" },
+        "indicatorDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "value": { "type": ["number", "null"] },
+        "releasedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "updatedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "observedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "price": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tradeDate", "adjClose"],
+      "properties": {
+        "tradeDate": { "$ref": "#/$defs/date" },
+        "adjClose": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "liquidity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windowStart", "windowEnd", "validCount", "averageTurnoverYen", "status"],
+      "properties": {
+        "windowStart": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "windowEnd": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "validCount": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "averageTurnoverYen": { "type": ["number", "null"], "minimum": 0 },
+        "status": { "enum": ["ok", "thin", "insufficient"] }
+      }
+    },
+    "etf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayCode", "localCode", "label", "current", "prior", "returnPct", "liquidity"],
+      "properties": {
+        "displayCode": { "type": "string", "pattern": "^\\d{3}[0-9A-Z]$" },
+        "localCode": { "type": "string", "pattern": "^\\d{3}[0-9A-Z]\\d$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "current": { "anyOf": [{ "$ref": "#/$defs/price" }, { "type": "null" }] },
+        "prior": { "anyOf": [{ "$ref": "#/$defs/price" }, { "type": "null" }] },
+        "returnPct": { "type": ["number", "null"] },
+        "liquidity": { "$ref": "#/$defs/liquidity" }
+      }
+    },
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "axisId",
+        "label",
+        "validationStatus",
+        "driver",
+        "observedDirection",
+        "upEtf",
+        "downEtf",
+        "driverAlignedEtf",
+        "momentumConfirmation",
+        "rationale",
+        "warnings"
+      ],
+      "properties": {
+        "axisId": { "enum": ["rates", "oil", "fx", "risk"] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "validationStatus": { "const": "unvalidated" },
+        "driver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seriesId", "label", "unit", "current", "prior", "change", "changeUnit", "freshnessDays", "provenance"],
+          "properties": {
+            "seriesId": { "enum": ["mof_jgb_20y", "DCOILWTICO", "DEXJPUS", "VIXCLS"] },
+            "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "unit": { "enum": ["percent", "usd_per_barrel", "jpy_per_usd", "index"] },
+            "current": { "$ref": "#/$defs/observation" },
+            "prior": { "$ref": "#/$defs/observation" },
+            "change": { "type": ["number", "null"] },
+            "changeUnit": { "enum": ["percentage_point", "percent", "index_point"] },
+            "freshnessDays": { "type": ["integer", "null"], "minimum": 0 },
+            "provenance": { "const": "latest_stored_non_vintage" }
+          }
+        },
+        "observedDirection": { "enum": ["up", "down", "neutral", "insufficient"] },
+        "upEtf": { "$ref": "#/$defs/etf" },
+        "downEtf": { "$ref": "#/$defs/etf" },
+        "driverAlignedEtf": {
+          "anyOf": [
+            { "type": "string", "pattern": "^\\d{3}[0-9A-Z]$" },
+            { "type": "null" }
+          ]
+        },
+        "momentumConfirmation": { "enum": ["aligned", "contrary", "neutral", "insufficient"] },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "warnings": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "ドライバーの比較値が欠測なら方向は判定不能。整合側ETFを名指ししない。",
+          "if": {
+            "properties": { "driver": { "properties": { "change": { "type": "null" } } } },
+            "required": ["driver"]
+          },
+          "then": {
+            "properties": {
+              "observedDirection": { "const": "insufficient" },
+              "driverAlignedEtf": { "type": "null" },
+              "momentumConfirmation": { "const": "insufficient" }
+            }
+          }
+        },
+        {
+          "$comment": "方向が判定不能なら確認指標も判定不能で、整合側ETFはnull。",
+          "if": { "properties": { "observedDirection": { "const": "insufficient" } }, "required": ["observedDirection"] },
+          "then": {
+            "properties": {
+              "driverAlignedEtf": { "type": "null" },
+              "momentumConfirmation": { "const": "insufficient" }
+            }
+          }
+        },
+        {
+          "$comment": "方向が中立（変化ゼロ）なら整合側ETFを名指しせず、確認指標もaligned/contraryにしない。",
+          "if": { "properties": { "observedDirection": { "const": "neutral" } }, "required": ["observedDirection"] },
+          "then": {
+            "properties": {
+              "driverAlignedEtf": { "type": "null" },
+              "momentumConfirmation": { "enum": ["neutral", "insufficient"] }
+            }
+          }
+        },
+        {
+          "$comment": "左右いずれかの騰落が欠測なら確認指標は判定不能。",
+          "if": {
+            "anyOf": [
+              { "properties": { "upEtf": { "properties": { "returnPct": { "type": "null" } }, "required": ["returnPct"] } }, "required": ["upEtf"] },
+              { "properties": { "downEtf": { "properties": { "returnPct": { "type": "null" } }, "required": ["returnPct"] } }, "required": ["downEtf"] }
+            ]
+          },
+          "then": { "properties": { "momentumConfirmation": { "const": "insufficient" } } }
+        }
+      ]
+    }
+  }
+}

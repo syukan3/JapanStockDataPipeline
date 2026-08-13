@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "contractHash": "a7f79568c12767e7ebeb4174c48c12264a959fd380a2f3e26c5fe43cb951073e",
+  "strategyVersion": "1.0.0",
+  "reportPeriodDate": "2026-08-15",
+  "asOfDate": "2026-08-14",
+  "comparisonDate": "2026-07-16",
+  "informationCutoffAt": "2026-08-15T01:30:00.000Z",
+  "generatedAt": "2026-08-15T01:30:01.000Z",
+  "summary": "4つの対立軸を20営業日変化で観測した未検証レポートです。",
+  "axes": [
+    {
+      "axisId": "rates",
+      "label": "長期金利",
+      "validationStatus": "unvalidated",
+      "driver": {
+        "seriesId": "mof_jgb_20y",
+        "label": "JGB20年利回り",
+        "unit": "percent",
+        "current": { "targetDate": "2026-08-14", "indicatorDate": "2026-08-13", "value": 3.66, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "prior": { "targetDate": "2026-07-16", "indicatorDate": "2026-07-16", "value": 3.54, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "change": 0.12,
+        "changeUnit": "percentage_point",
+        "freshnessDays": 1,
+        "provenance": "latest_stored_non_vintage"
+      },
+      "observedDirection": "up",
+      "upEtf": { "displayCode": "1615", "localCode": "16150", "label": "銀行", "current": { "tradeDate": "2026-08-14", "adjClose": 740.2 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 710.1 }, "returnPct": 4.24, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 1820000000, "status": "ok" } },
+      "downEtf": { "displayCode": "1633", "localCode": "16330", "label": "不動産", "current": { "tradeDate": "2026-08-14", "adjClose": 48820 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 49500 }, "returnPct": -1.37, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 18300000, "status": "thin" } },
+      "driverAlignedEtf": "1615",
+      "momentumConfirmation": "aligned",
+      "rationale": "金利は上昇方向。ETF騰落は観測方向と同じ向きです。",
+      "warnings": ["予測力は未検証です。", "1633は流動性基準を下回ります。"]
+    },
+    {
+      "axisId": "oil",
+      "label": "原油",
+      "validationStatus": "unvalidated",
+      "driver": {
+        "seriesId": "DCOILWTICO",
+        "label": "WTI原油",
+        "unit": "usd_per_barrel",
+        "current": { "targetDate": "2026-08-14", "indicatorDate": "2026-08-12", "value": 81.96, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "prior": { "targetDate": "2026-07-16", "indicatorDate": "2026-07-16", "value": 77.2, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "change": 6.17,
+        "changeUnit": "percent",
+        "freshnessDays": 2,
+        "provenance": "latest_stored_non_vintage"
+      },
+      "observedDirection": "up",
+      "upEtf": { "displayCode": "1618", "localCode": "16180", "label": "エネルギー資源", "current": { "tradeDate": "2026-08-14", "adjClose": 33210 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 32000 }, "returnPct": 3.78, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 44200000, "status": "thin" } },
+      "downEtf": { "displayCode": "1628", "localCode": "16280", "label": "運輸・物流", "current": { "tradeDate": "2026-08-14", "adjClose": 21370 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 21450 }, "returnPct": -0.37, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 9590000, "status": "thin" } },
+      "driverAlignedEtf": "1618",
+      "momentumConfirmation": "aligned",
+      "rationale": "原油は上昇方向。ETF騰落は観測方向と同じ向きです。",
+      "warnings": ["予測力は未検証です。", "両ETFとも流動性基準を下回ります。"]
+    },
+    {
+      "axisId": "fx",
+      "label": "為替",
+      "validationStatus": "unvalidated",
+      "driver": {
+        "seriesId": "DEXJPUS",
+        "label": "USD/JPY",
+        "unit": "jpy_per_usd",
+        "current": { "targetDate": "2026-08-14", "indicatorDate": "2026-08-07", "value": 159.16, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "prior": { "targetDate": "2026-07-16", "indicatorDate": "2026-07-16", "value": 157.8, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "change": 0.86,
+        "changeUnit": "percent",
+        "freshnessDays": 7,
+        "provenance": "latest_stored_non_vintage"
+      },
+      "observedDirection": "up",
+      "upEtf": { "displayCode": "1622", "localCode": "16220", "label": "自動車・輸送機", "current": { "tradeDate": "2026-08-14", "adjClose": 35090 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 34200 }, "returnPct": 2.6, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 4640000, "status": "thin" } },
+      "downEtf": { "displayCode": "1630", "localCode": "16300", "label": "小売", "current": { "tradeDate": "2026-08-14", "adjClose": 38640 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 38100 }, "returnPct": 1.42, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 33700000, "status": "thin" } },
+      "driverAlignedEtf": "1622",
+      "momentumConfirmation": "aligned",
+      "rationale": "円安方向ですが、系列の鮮度に注意が必要です。",
+      "warnings": ["予測力は未検証です。"]
+    },
+    {
+      "axisId": "risk",
+      "label": "市場不安",
+      "validationStatus": "unvalidated",
+      "driver": {
+        "seriesId": "VIXCLS",
+        "label": "VIX",
+        "unit": "index",
+        "current": { "targetDate": "2026-08-14", "indicatorDate": "2026-08-13", "value": 15.15, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "prior": { "targetDate": "2026-07-16", "indicatorDate": "2026-07-16", "value": 17.4, "releasedAt": null, "updatedAt": null, "observedAt": "2026-08-15T01:30:00.000Z" },
+        "change": -2.25,
+        "changeUnit": "index_point",
+        "freshnessDays": 1,
+        "provenance": "latest_stored_non_vintage"
+      },
+      "observedDirection": "down",
+      "upEtf": { "displayCode": "1621", "localCode": "16210", "label": "医薬品", "current": { "tradeDate": "2026-08-14", "adjClose": 30570 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 30200 }, "returnPct": 1.23, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 40400000, "status": "thin" } },
+      "downEtf": { "displayCode": "1625", "localCode": "16250", "label": "電機・精密", "current": { "tradeDate": "2026-08-14", "adjClose": 66060 }, "prior": { "tradeDate": "2026-07-16", "adjClose": 64000 }, "returnPct": 3.22, "liquidity": { "windowStart": "2026-07-17", "windowEnd": "2026-08-14", "validCount": 20, "averageTurnoverYen": 52400000, "status": "ok" } },
+      "driverAlignedEtf": "1625",
+      "momentumConfirmation": "aligned",
+      "rationale": "VIXは低下方向。ETF騰落は観測方向と同じ向きです。",
+      "warnings": ["予測力は未検証です。", "1621は流動性基準を下回ります。"]
+    }
+  ],
+  "caveats": [
+    "本レポートはフォワード検証中の観測資料であり、売買推奨ではありません。",
+    "関連する63日業種マクロ評価はNo-Goで、順張り方向の多くに平均回帰が観測されています。",
+    "TOPIX-17 ETFは33業種分類と一致しない場合があり、純粋な業種ペアではありません。"
+  ]
+}
