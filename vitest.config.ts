@@ -72,6 +72,10 @@ export default defineConfig({
         // basket valuation
         'src/lib/analytics/basket-valuation.ts',
         'src/lib/analytics/basket-valuation-data.ts',
+        // 週足（追跡銘柄限定の長期チャート）
+        'src/lib/analytics/weekly-bars.ts',
+        'src/lib/analytics/weekly-bars-backfill.ts',
+        'src/lib/analytics/tracked-codes.ts',
       ],
       thresholds: {
         statements: 80,
