@@ -26,6 +26,28 @@
 /** YYYY-MM-DD */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** J-Quants Standard の遡及上限（10年ローリング） */
+export const BACKFILL_YEARS = 10;
+
+/**
+ * バックフィルの取得期間（BACKFILL_YEARS 年前 〜 today）を返す。
+ * UTC 計算でタイムゾーンに依存させない（today は JST 日付 or 最新 trade_date を渡す想定）。
+ *
+ * seed:weekly-bars（初回投入）と Cron A の新規追跡銘柄バックフィルで共用する。
+ * 依存ゼロの本モジュールに置くのは、seed 側が環境変数ロード前に静的 import できるようにするため。
+ *
+ * @throws 形式不正・実在しない日付
+ */
+export function getBackfillRange(today: string): { from: string; to: string } {
+  const ms = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(ms)) {
+    throw new Error(`getBackfillRange: YYYY-MM-DD 形式で指定してください: ${today}`);
+  }
+  const from = new Date(ms);
+  from.setUTCFullYear(from.getUTCFullYear() - BACKFILL_YEARS);
+  return { from: from.toISOString().slice(0, 10), to: today };
+}
+
 /**
  * 集計の入力行。`EquityBarBasicRecord`（jquants/endpoints/equity-bars-daily）や
  * PostgREST の生行をそのまま渡せるよう、数値列は unknown で受けて Number() 正規化する

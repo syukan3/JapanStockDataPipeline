@@ -18,9 +18,11 @@
  */
 
 import { loadEnv, createProgress, logResult, startTimer, type SeedResult } from './_shared';
+// 取得期間の算出は Cron A の新規追跡銘柄バックフィル（scripts/cron/refresh-weekly-bars.ts）と共用する。
+// weekly-bars.ts は依存ゼロの純関数モジュールなので loadEnv 前の静的 import でも副作用が無い。
+import { BACKFILL_YEARS, getBackfillRange } from '../../src/lib/analytics/weekly-bars';
 
-/** J-Quants Standard の遡及上限（10年ローリング） */
-export const BACKFILL_YEARS = 10;
+export { BACKFILL_YEARS, getBackfillRange };
 
 export interface WeeklyBarsSeedArgs {
   /** --code で指定された対象銘柄（未指定なら追跡銘柄全件） */
@@ -55,20 +57,6 @@ export function parseWeeklyBarsSeedArgs(argv: string[]): WeeklyBarsSeedArgs {
   }
 
   return { codes, dryRun };
-}
-
-/**
- * 取得期間（BACKFILL_YEARS 年前 〜 today）を返す。
- * UTC 計算でタイムゾーンに依存させない（today は JST 日付を渡す想定）。
- */
-export function getBackfillRange(today: string): { from: string; to: string } {
-  const ms = Date.parse(`${today}T00:00:00Z`);
-  if (Number.isNaN(ms)) {
-    throw new Error(`getBackfillRange: YYYY-MM-DD 形式で指定してください: ${today}`);
-  }
-  const from = new Date(ms);
-  from.setUTCFullYear(from.getUTCFullYear() - BACKFILL_YEARS);
-  return { from: from.toISOString().slice(0, 10), to: today };
 }
 
 async function main(): Promise<SeedResult> {

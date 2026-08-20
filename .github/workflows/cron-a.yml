@@ -193,6 +193,23 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/refresh-market-indicators.ts --only-breadth
 
+      # 保有・ウォッチ銘柄限定の長期週足（analytics.equity_bar_weekly）を日次メンテ。
+      # 新規追跡銘柄の10年バックフィル / 分割・併合の検知→再基準化RPC / 直近2週の再集計。
+      # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま（対象は数十銘柄の
+      # チャート用途。翌日の実行が検知7日窓＋2週集計窓で自己修復する）。
+      # rebase 失敗時はスキップする（分割が未調整の日足から週足を作らないため）。
+      - name: Refresh weekly bars (tracked stocks)
+        id: refresh_weekly_bars
+        if: always() && steps.equity_bars.outcome == 'success' && steps.rebase.outcome == 'success'
+        continue-on-error: true
+        env:
+          # 新規追跡銘柄のバックフィルのみ J-Quants を叩く（直近2週の更新は equity_bar_daily から）
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          # portfolio スキーマ（保有・ウォッチ）も同一 service_role キーで読む
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/refresh-weekly-bars.ts
+
       # external(Yahoo/nikkei225jp)/weekly/derived は株価同期と独立に実行できる
       # （日経終値・PER等は外部ソース由来。同期失敗日でも取り込みを止めない）。
       - name: Refresh market indicators - external

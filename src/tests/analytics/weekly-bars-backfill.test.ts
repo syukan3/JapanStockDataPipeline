@@ -4,7 +4,8 @@
  * 検証の要点:
  * - 取得は**取得専用**の fetchEquityBarsDailyPaginated（equity_bar_daily へ upsert する
  *   syncEquityBarsDailyForCode を使っていないこと）
- * - 書き込みは analytics スキーマの equity_bar_weekly のみ・on_conflict は local_code,week_start
+ * - 書き込みは analytics スキーマの equity_bar_weekly と台帳のみ・on_conflict は local_code,week_start
+ * - 二重調整防止の台帳シーディング（factor≠1 の日を「適用済み」として直接記録・RPCは呼ばない）
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -59,8 +60,12 @@ vi.mock('@/lib/utils/logger', () => ({
 
 import {
   backfillWeeklyBarsForCode,
+  extractRebaseEvents,
+  WEEKLY_BACKFILL_BATCH_SIZE,
   WEEKLY_BARS_TABLE,
   WEEKLY_BARS_ON_CONFLICT,
+  WEEKLY_REBASE_EVENTS_TABLE,
+  WEEKLY_REBASE_EVENTS_ON_CONFLICT,
 } from '@/lib/analytics/weekly-bars-backfill';
 import type { EquityBarDailyItem } from '@/lib/jquants/types';
 
@@ -93,9 +98,17 @@ function givenPages(pages: EquityBarDailyItem[][]): void {
   });
 }
 
-const analyticsClient = { tag: 'analytics' };
+/** 台帳 upsert 用の analytics クライアントモック（batchUpsert 自体はモック済みなので from は台帳専用） */
+function createAnalyticsClient(upsertResult: { error: { message: string } | null } = { error: null }) {
+  const upsert = vi.fn(async () => upsertResult);
+  const from = vi.fn(() => ({ upsert }));
+  return { tag: 'analytics', from, upsert };
+}
+
+let analyticsClient = createAnalyticsClient();
 
 beforeEach(() => {
+  analyticsClient = createAnalyticsClient();
   mockCreateJQuantsClient.mockReturnValue({ tag: 'jquants' });
   mockCreateAdminClient.mockReturnValue(analyticsClient);
   mockBatchUpsert.mockResolvedValue({ inserted: 0, errors: [], batchCount: 0 });
@@ -140,7 +153,8 @@ describe('backfillWeeklyBarsForCode', () => {
           adj_volume: 3000,
         },
       ],
-      WEEKLY_BARS_ON_CONFLICT
+      WEEKLY_BARS_ON_CONFLICT,
+      { batchSize: WEEKLY_BACKFILL_BATCH_SIZE }
     );
     expect(result).toEqual({
       local_code: '72030',
@@ -148,12 +162,31 @@ describe('backfillWeeklyBarsForCode', () => {
       weeks: 1,
       upserted: 1,
       pageCount: 1,
+      rebaseEvents: 0,
     });
   });
 
   it('on_conflict は local_code,week_start（週で安定させる）', () => {
     expect(WEEKLY_BARS_ON_CONFLICT).toBe('local_code,week_start');
     expect(WEEKLY_BARS_TABLE).toBe('equity_bar_weekly');
+  });
+
+  it('10年分（約520週）を1バッチで投入する（部分書き込みで「バックフィル済み」と誤判定させない）', async () => {
+    // 10年 = 522 ISO週。バッチが割れると先行バッチだけ残った銘柄が翌日以降の
+    // 新規判定（行の有無）から外れ、中間週が恒久欠損する。
+    expect(WEEKLY_BACKFILL_BATCH_SIZE).toBeGreaterThan(522);
+
+    const days = Array.from({ length: 600 }, (_, i) => {
+      const d = new Date(Date.UTC(2016, 0, 4) + i * 7 * 86400000);
+      return item({ Date: d.toISOString().slice(0, 10) });
+    });
+    givenPages([days]);
+
+    await backfillWeeklyBarsForCode('72030', '2016-01-04', '2027-06-30');
+
+    expect(mockBatchUpsert).toHaveBeenCalledTimes(1);
+    expect(mockBatchUpsert.mock.calls[0][2]).toHaveLength(600);
+    expect(mockBatchUpsert.mock.calls[0][4]).toEqual({ batchSize: WEEKLY_BACKFILL_BATCH_SIZE });
   });
 
   it('equity_bar_daily へは一切書かない（取得専用経路を使う）', async () => {
@@ -217,6 +250,7 @@ describe('backfillWeeklyBarsForCode', () => {
       weeks: 0,
       upserted: 0,
       pageCount: 1,
+      rebaseEvents: 0,
     });
   });
 
@@ -255,5 +289,129 @@ describe('backfillWeeklyBarsForCode', () => {
     await expect(backfillWeeklyBarsForCode('72030', '2026/08/01', '2026-08-31')).rejects.toThrow('YYYY-MM-DD');
     await expect(backfillWeeklyBarsForCode('72030', '2026-08-31', '2026-08-01')).rejects.toThrow('from は to 以前');
     expect(mockFetchPaginated).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 台帳シーディング（二重調整防止・§4.2）
+// ---------------------------------------------------------------------------
+
+describe('extractRebaseEvents', () => {
+  const bar = (overrides: Record<string, unknown>) => ({
+    trade_date: '2026-08-17',
+    local_code: '72030',
+    session: 'DAY',
+    adjustment_factor: 1,
+    ...overrides,
+  });
+
+  it('factor が非 null かつ ≠1 の日だけを抽出し日付昇順で返す', () => {
+    expect(
+      extractRebaseEvents([
+        bar({ trade_date: '2026-08-21', adjustment_factor: 0.5 }),
+        bar({ trade_date: '2026-08-18', adjustment_factor: 1 }),
+        bar({ trade_date: '2026-08-17', adjustment_factor: 2 }),
+        bar({ trade_date: '2026-08-19', adjustment_factor: null }),
+        bar({ trade_date: '2026-08-20', adjustment_factor: undefined }),
+      ])
+    ).toEqual([
+      { local_code: '72030', event_date: '2026-08-17', adjustment_factor: 2 },
+      { local_code: '72030', event_date: '2026-08-21', adjustment_factor: 0.5 },
+    ]);
+  });
+
+  it('numeric が文字列でも数値化する', () => {
+    expect(extractRebaseEvents([bar({ adjustment_factor: '0.2' })])).toEqual([
+      { local_code: '72030', event_date: '2026-08-17', adjustment_factor: 0.2 },
+    ]);
+    expect(extractRebaseEvents([bar({ adjustment_factor: '1' })])).toEqual([]);
+  });
+
+  it('DAY 以外のセッションと数値化できない値は無視する', () => {
+    expect(
+      extractRebaseEvents([
+        bar({ session: 'AM', adjustment_factor: 0.5 }),
+        bar({ trade_date: '2026-08-18', adjustment_factor: 'N/A' }),
+        bar({ trade_date: '2026-08-19', adjustment_factor: '' }),
+      ])
+    ).toEqual([]);
+  });
+
+  it('同一日の重複行は1件にまとめる', () => {
+    expect(
+      extractRebaseEvents([bar({ adjustment_factor: 0.5 }), bar({ adjustment_factor: 0.5 })])
+    ).toHaveLength(1);
+  });
+});
+
+describe('backfillWeeklyBarsForCode（台帳シーディング）', () => {
+  it('factor≠1 の日を「適用済み」として台帳へ upsert する（ignoreDuplicates）', async () => {
+    givenPages([
+      [
+        item({ Date: '2026-08-17', AdjFactor: 1 }),
+        item({ Date: '2026-08-18', AdjFactor: 0.5 }),
+        item({ Date: '2026-08-24', AdjFactor: 2 }),
+      ],
+    ]);
+
+    const result = await backfillWeeklyBarsForCode('72030', '2026-08-01', '2026-08-31');
+
+    expect(analyticsClient.from).toHaveBeenCalledWith(WEEKLY_REBASE_EVENTS_TABLE);
+    expect(analyticsClient.upsert).toHaveBeenCalledWith(
+      [
+        { local_code: '72030', event_date: '2026-08-18', adjustment_factor: 0.5 },
+        { local_code: '72030', event_date: '2026-08-24', adjustment_factor: 2 },
+      ],
+      { onConflict: WEEKLY_REBASE_EVENTS_ON_CONFLICT, ignoreDuplicates: true }
+    );
+    expect(result.rebaseEvents).toBe(2);
+  });
+
+  it('RPC apply_weekly_rebase_event は呼ばない（API の adj は既にイベント織込み済み）', async () => {
+    givenPages([[item({ Date: '2026-08-18', AdjFactor: 0.5 })]]);
+    const injectedAnalytics = { ...createAnalyticsClient(), rpc: vi.fn() };
+
+    await backfillWeeklyBarsForCode('72030', '2026-08-01', '2026-08-31', {
+      analytics: injectedAnalytics,
+    });
+
+    expect(injectedAnalytics.rpc).not.toHaveBeenCalled();
+    expect(injectedAnalytics.from).toHaveBeenCalledWith(WEEKLY_REBASE_EVENTS_TABLE);
+  });
+
+  it('分割の無い銘柄では台帳に触らない', async () => {
+    givenPages([[item({ Date: '2026-08-17', AdjFactor: 1 })]]);
+
+    const result = await backfillWeeklyBarsForCode('72030', '2026-08-01', '2026-08-31');
+
+    expect(analyticsClient.from).not.toHaveBeenCalled();
+    expect(result.rebaseEvents).toBe(0);
+  });
+
+  it('台帳は週足 upsert より前に書く（中断しても翌日のバックフィルで自己修復させる）', async () => {
+    givenPages([[item({ Date: '2026-08-18', AdjFactor: 0.5 })]]);
+    const order: string[] = [];
+    analyticsClient.upsert.mockImplementation(async () => {
+      order.push('ledger');
+      return { error: null };
+    });
+    mockBatchUpsert.mockImplementation(async () => {
+      order.push('weekly');
+      return { inserted: 1, errors: [], batchCount: 1 };
+    });
+
+    await backfillWeeklyBarsForCode('72030', '2026-08-01', '2026-08-31');
+
+    expect(order).toEqual(['ledger', 'weekly']);
+  });
+
+  it('台帳 upsert エラーは週足を書かずに throw', async () => {
+    givenPages([[item({ Date: '2026-08-18', AdjFactor: 0.5 })]]);
+    analyticsClient.upsert.mockResolvedValue({ error: { message: 'permission denied' } });
+
+    await expect(backfillWeeklyBarsForCode('72030', '2026-08-01', '2026-08-31')).rejects.toThrow(
+      'equity_bar_weekly_rebase_events upsert failed for 72030: permission denied'
+    );
+    expect(mockBatchUpsert).not.toHaveBeenCalled();
   });
 });

@@ -75,6 +75,7 @@ export default defineConfig({
         // 週足（追跡銘柄限定の長期チャート）
         'src/lib/analytics/weekly-bars.ts',
         'src/lib/analytics/weekly-bars-backfill.ts',
+        'src/lib/analytics/refresh-weekly-bars.ts',
         'src/lib/analytics/tracked-codes.ts',
       ],
       thresholds: {
