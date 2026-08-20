@@ -127,6 +127,10 @@ begin
   v_week_start := date_trunc('week', p_event_date)::date;
 
   -- (a) イベント週より前の全週: 既存 adj_* へ増分係数のみ適用（raw は触らない）
+  --     adj_volume は「週合計 ÷ 係数」の週次近似（00093 の日次規約は各日丸め後に合計するため
+  --     一般には微小差が出る）。価格系の numeric(18,6) 丸めもイベント毎に累積し得るが、
+  --     いずれもチャート用途では無視できる誤差として意図的に許容する
+
   update analytics.equity_bar_weekly w
   set adj_open   = (w.adj_open  * p_factor)::numeric(18,6),
       adj_high   = (w.adj_high  * p_factor)::numeric(18,6),
