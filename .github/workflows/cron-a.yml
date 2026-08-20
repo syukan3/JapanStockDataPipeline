@@ -195,13 +195,13 @@ jobs:
 
       # 保有・ウォッチ銘柄限定の長期週足（analytics.equity_bar_weekly）を日次メンテ。
       # 新規追跡銘柄の10年バックフィル / 分割・併合の検知→再基準化RPC / 直近2週の再集計。
-      # 非クリティカル: 失敗しても生データ同期(cron_a 本体)は成功扱いのまま（対象は数十銘柄の
-      # チャート用途。翌日の実行が検知7日窓＋2週集計窓で自己修復する）。
+      # 後続ステップはこのステップに依存しないが、失敗は他ステップ同様に通知メールへ流す
+      # （continue-on-error にすると 00124 未適用等の恒久障害がサイレント化する。
+      # 一過性の失敗は翌日の検知7日窓＋2週集計窓で自己修復する）。
       # rebase 失敗時はスキップする（分割が未調整の日足から週足を作らないため）。
       - name: Refresh weekly bars (tracked stocks)
         id: refresh_weekly_bars
         if: always() && steps.equity_bars.outcome == 'success' && steps.rebase.outcome == 'success'
-        continue-on-error: true
         env:
           # 新規追跡銘柄のバックフィルのみ J-Quants を叩く（直近2週の更新は equity_bar_daily から）
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
