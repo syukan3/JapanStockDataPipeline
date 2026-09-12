@@ -4,6 +4,9 @@ import {
   NonRetryableError,
   withRetry,
   fetchWithRetry,
+  withPostgrestRetry,
+  isTransientPostgrestStatus,
+  TRANSIENT_POSTGREST_STATUS_CODES,
 } from '@/lib/utils/retry';
 
 describe('retry.ts', () => {
@@ -346,6 +349,188 @@ describe('retry.ts', () => {
         expect(response.ok).toBe(true);
         expect(fetch).toHaveBeenCalledTimes(2);
       }
+    });
+  });
+  describe('withPostgrestRetry', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('成功応答はそのまま返す', async () => {
+      const run = vi.fn().mockResolvedValue({ data: [1], error: null, status: 200 });
+
+      const result = await withPostgrestRetry(run);
+
+      expect(result.data).toEqual([1]);
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it('504 Gateway Timeout はリトライして成功する', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: { message: 'Gateway Timeout' }, status: 504 })
+        .mockResolvedValue({ data: ['ok'], error: null, status: 200 });
+      const onRetry = vi.fn();
+
+      const resultPromise = withPostgrestRetry(run, {
+        maxRetries: 3,
+        baseDelayMs: 100,
+        jitterMs: 0,
+        onRetry,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await resultPromise;
+
+      expect(result.error).toBeNull();
+      expect(result.data).toEqual(['ok']);
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(onRetry).toHaveBeenCalledTimes(1);
+    });
+
+    it('ネットワーク障害（status=0）もリトライ対象', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: { message: 'FetchError: fetch failed' }, status: 0 })
+        .mockResolvedValue({ data: [], error: null, status: 200 });
+
+      const resultPromise = withPostgrestRetry(run, {
+        maxRetries: 2,
+        baseDelayMs: 100,
+        jitterMs: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await resultPromise;
+
+      expect(result.error).toBeNull();
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+
+    it('429 Too Many Requests はリトライして成功する', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: { message: 'Too Many Requests' }, status: 429 })
+        .mockResolvedValue({ data: ['ok'], error: null, status: 200 });
+
+      const resultPromise = withPostgrestRetry(run, {
+        maxRetries: 2,
+        baseDelayMs: 100,
+        jitterMs: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await resultPromise;
+
+      expect(result.error).toBeNull();
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+
+    it('408 Request Timeout はリトライして成功する', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: { message: 'Request Timeout' }, status: 408 })
+        .mockResolvedValue({ data: ['ok'], error: null, status: 200 });
+
+      const resultPromise = withPostgrestRetry(run, {
+        maxRetries: 2,
+        baseDelayMs: 100,
+        jitterMs: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await resultPromise;
+
+      expect(result.error).toBeNull();
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+
+    it('4xx（業務エラー）はリトライしない', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: { message: 'column does not exist' }, status: 400 });
+
+      const result = await withPostgrestRetry(run, { maxRetries: 3, baseDelayMs: 100, jitterMs: 0 });
+
+      expect(result.error?.message).toBe('column does not exist');
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it('status を持たないエラー応答はリトライしない', async () => {
+      const run = vi.fn().mockResolvedValue({ error: { message: 'upsert failed' } });
+
+      const result = await withPostgrestRetry(run, { maxRetries: 3, baseDelayMs: 100, jitterMs: 0 });
+
+      expect(result.error?.message).toBe('upsert failed');
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it('リトライ上限に達したらエラーを含んだまま返す', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: { message: 'Gateway Timeout' }, status: 504 });
+
+      const resultPromise = withPostgrestRetry(run, {
+        maxRetries: 2,
+        baseDelayMs: 100,
+        jitterMs: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(200);
+      const result = await resultPromise;
+
+      expect(result.error?.message).toBe('Gateway Timeout');
+      expect(run).toHaveBeenCalledTimes(3); // 初回 + リトライ2回
+    });
+
+    it('プロキシ由来の 5xx（520等）もリトライする', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: { message: 'Unknown Error' }, status: 520 })
+        .mockResolvedValue({ data: ['ok'], error: null, status: 200 });
+
+      const resultPromise = withPostgrestRetry(run, {
+        maxRetries: 2,
+        baseDelayMs: 100,
+        jitterMs: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await resultPromise;
+
+      expect(result.error).toBeNull();
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+
+    it('retryStatusCodes を明示するとそのリストのみ対象になる', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: { message: 'Gateway Timeout' }, status: 504 });
+
+      const result = await withPostgrestRetry(run, {
+        maxRetries: 2,
+        baseDelayMs: 100,
+        jitterMs: 0,
+        retryStatusCodes: [429],
+      });
+
+      expect(result.error?.message).toBe('Gateway Timeout');
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it('isTransientPostgrestStatus は 5xx と 0/408/429 を一時的とみなす', () => {
+      for (const status of [0, 408, 429, 500, 502, 503, 504, 520, 599]) {
+        expect(isTransientPostgrestStatus(status)).toBe(true);
+      }
+      for (const status of [200, 400, 401, 404, 409, 422]) {
+        expect(isTransientPostgrestStatus(status)).toBe(false);
+      }
+      expect(TRANSIENT_POSTGREST_STATUS_CODES).toEqual([0, 408, 429]);
     });
   });
 });

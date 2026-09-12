@@ -61,6 +61,23 @@ function shouldLog(level: LogLevel): boolean {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[MIN_LOG_LEVEL];
 }
 
+/** 非Errorオブジェクトからログに残すフィールド（機微情報の混入を避ける allowlist） */
+const ERROR_FIELD_ALLOWLIST = [
+  'name',
+  'message',
+  'code',
+  'status',
+  'statusCode',
+  'details',
+  'hint',
+] as const;
+
+/** 抽出した文字列フィールドの最大長 */
+const MAX_ERROR_FIELD_LENGTH = 500;
+
+/** 既知フィールドが無い場合に残すキー名の最大数 */
+const MAX_ERROR_KEYS = 20;
+
 /**
  * エラーオブジェクトをシリアライズ可能な形式に変換
  */
@@ -72,6 +89,29 @@ function serializeError(error: unknown): Record<string, unknown> {
       stack: error.stack?.split('\n').slice(0, 5).join('\n'), // スタックトレースを5行に制限
       ...(error.cause ? { cause: serializeError(error.cause) } : {}),
     };
+  }
+  // Resend / PostgREST 等の SDK は Error ではないプレーンオブジェクトを返すことがある。
+  // String() だと "[object Object]" になり原因が消えるため、診断に必要な項目だけ抽出する。
+  // オブジェクト全体を展開するとヘッダやトークン等の機微情報がログに残りうるため allowlist 方式。
+  if (error !== null && typeof error === 'object') {
+    const source = error as Record<string, unknown>;
+    const extracted: Record<string, unknown> = {};
+
+    for (const key of ERROR_FIELD_ALLOWLIST) {
+      const value = source[key];
+      if (typeof value === 'string') {
+        extracted[key] = value.slice(0, MAX_ERROR_FIELD_LENGTH);
+      } else if (typeof value === 'number' || typeof value === 'boolean') {
+        extracted[key] = value;
+      }
+    }
+
+    if (Object.keys(extracted).length > 0) {
+      return extracted;
+    }
+
+    // 既知フィールドが無い場合は値を出さず、キー名のみ残す（値の漏えいを避ける）
+    return { keys: Object.keys(source).slice(0, MAX_ERROR_KEYS) };
   }
   return { value: String(error) };
 }

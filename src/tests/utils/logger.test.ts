@@ -134,6 +134,70 @@ describe('logger.ts', () => {
       const loggedJson = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
       expect(loggedJson.error.value).toBe('string error');
     });
+
+    it('プレーンオブジェクトのエラーは中身を保持する', () => {
+      const logger = createLogger();
+      // Resend SDK 等は Error ではないオブジェクトを返す
+      logger.error('error occurred', {
+        error: { statusCode: 429, name: 'rate_limit_exceeded', message: 'Too many requests' },
+      });
+
+      const loggedJson = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
+      expect(loggedJson.error.name).toBe('rate_limit_exceeded');
+      expect(loggedJson.error.message).toBe('Too many requests');
+      expect(loggedJson.error.statusCode).toBe(429);
+    });
+
+    it('allowlist外のフィールド（認証情報等）はログに出さない', () => {
+      const logger = createLogger();
+      logger.error('error occurred', {
+        error: {
+          message: 'Unauthorized',
+          statusCode: 401,
+          headers: { authorization: 'Bearer super-secret-token' },
+          request: { url: 'https://api.example.com?apikey=secret' },
+        },
+      });
+
+      const raw = consoleErrorSpy.mock.calls[0][0] as string;
+      expect(raw).not.toContain('super-secret-token');
+      expect(raw).not.toContain('apikey=secret');
+
+      const loggedJson = JSON.parse(raw);
+      expect(loggedJson.error.message).toBe('Unauthorized');
+      expect(loggedJson.error.statusCode).toBe(401);
+      expect(loggedJson.error.headers).toBeUndefined();
+      expect(loggedJson.error.request).toBeUndefined();
+    });
+
+    it('長すぎる文字列フィールドは500文字に切り詰める', () => {
+      const logger = createLogger();
+      logger.error('error occurred', { error: { message: 'a'.repeat(501) } });
+
+      const loggedJson = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
+      expect(loggedJson.error.message).toHaveLength(500);
+    });
+
+    it('既知フィールドが無いオブジェクトはキー名のみ残す', () => {
+      const logger = createLogger();
+      logger.error('error occurred', { error: { secretValue: 'do-not-log-me' } });
+
+      const raw = consoleErrorSpy.mock.calls[0][0] as string;
+      expect(raw).not.toContain('do-not-log-me');
+      expect(JSON.parse(raw).error.keys).toEqual(['secretValue']);
+    });
+
+    it('循環参照を含むオブジェクトでも落ちない', () => {
+      const logger = createLogger();
+      const circular: Record<string, unknown> = { message: 'weird' };
+      circular.self = circular;
+
+      expect(() => logger.error('error occurred', { error: circular })).not.toThrow();
+
+      const loggedJson = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
+      expect(loggedJson.error.message).toBe('weird');
+      expect(loggedJson.error.self).toBeUndefined();
+    });
   });
 
   describe('child ロガー', () => {

@@ -12,6 +12,7 @@ import { createEStatClient } from '../../estat/client';
 import { isMonthlyOrLower } from '../../fred/series-config';
 import { createMofClient, tenorForSourceSeriesId, releasedAtForJgbDate } from '../../mof/client';
 import { createAdminClient } from '../../supabase/admin';
+import { withPostgrestRetry } from '../../utils/retry';
 import { sendJobFailureEmail } from '../../notification/email';
 
 const logger = createLogger({ module: 'cron-d-macro' });
@@ -40,6 +41,28 @@ export interface CronDResult {
 
 /** ジョブ名 */
 const JOB_NAME = 'cron-d-macro';
+
+/**
+ * Supabase 一時障害（5xx / Gateway Timeout / ネットワーク断）用のリトライ設定
+ *
+ * @description supabase-js は 504 でも例外を投げず error を返すため、
+ * 呼び出し側でリトライしないと一過性の障害で Cron 全体が落ちる
+ */
+function supabaseRetryOptions(operation: string, seriesId?: string, maxRetries = 2) {
+  return {
+    // ワークフローの15分制限内に収めるため系列単位の再試行は控えめにする
+    maxRetries,
+    onRetry: (attempt: number, error: Error, delayMs: number) => {
+      logger.warn('Retrying Supabase operation', {
+        operation,
+        seriesId,
+        attempt,
+        delayMs,
+        error: error.message,
+      });
+    },
+  };
+}
 
 /** 月次指標のvintage再取得日数（直近3ヶ月） */
 const VINTAGE_REFETCH_DAYS = 90;
@@ -152,9 +175,13 @@ async function processFredSeries(
       const batchSize = 1000;
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = rows.slice(i, i + batchSize);
-        const { error } = await supabaseCore
-          .from('macro_indicator_daily')
-          .upsert(batch, { onConflict: 'indicator_date,series_id' });
+        const { error } = await withPostgrestRetry(
+          () =>
+            supabaseCore
+              .from('macro_indicator_daily')
+              .upsert(batch, { onConflict: 'indicator_date,series_id' }),
+          supabaseRetryOptions('upsert macro_indicator_daily', series.series_id)
+        );
 
         if (error) {
           logger.error('Failed to upsert FRED data', {
@@ -175,13 +202,25 @@ async function processFredSeries(
         observations[0].date
       );
 
-      await supabaseCore
-        .from('macro_series_metadata')
-        .update({
-          last_fetched_at: new Date().toISOString(),
-          last_value_date: maxDate,
-        })
-        .eq('series_id', series.series_id);
+      const { error: metaError } = await withPostgrestRetry(
+        () =>
+          supabaseCore
+            .from('macro_series_metadata')
+            .update({
+              last_fetched_at: new Date().toISOString(),
+              last_value_date: maxDate,
+            })
+            .eq('series_id', series.series_id),
+        supabaseRetryOptions('update macro_series_metadata', series.series_id)
+      );
+
+      if (metaError) {
+        // 値自体は投入済み。次回は last_value_date が古いまま再取得されるだけなので警告に留める
+        logger.warn('Failed to update series metadata', {
+          seriesId: series.series_id,
+          error: metaError.message,
+        });
+      }
 
       logger.info('FRED series processed', {
         seriesId: series.series_id,
@@ -257,9 +296,13 @@ async function processEStatSeries(
       const batchSize = 1000;
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = rows.slice(i, i + batchSize);
-        const { error } = await supabaseCore
-          .from('macro_indicator_daily')
-          .upsert(batch, { onConflict: 'indicator_date,series_id' });
+        const { error } = await withPostgrestRetry(
+          () =>
+            supabaseCore
+              .from('macro_indicator_daily')
+              .upsert(batch, { onConflict: 'indicator_date,series_id' }),
+          supabaseRetryOptions('upsert macro_indicator_daily', series.series_id)
+        );
 
         if (error) {
           logger.error('Failed to upsert e-Stat data', {
@@ -280,13 +323,25 @@ async function processEStatSeries(
         filteredObs[0].date
       );
 
-      await supabaseCore
-        .from('macro_series_metadata')
-        .update({
-          last_fetched_at: new Date().toISOString(),
-          last_value_date: maxDate,
-        })
-        .eq('series_id', series.series_id);
+      const { error: metaError } = await withPostgrestRetry(
+        () =>
+          supabaseCore
+            .from('macro_series_metadata')
+            .update({
+              last_fetched_at: new Date().toISOString(),
+              last_value_date: maxDate,
+            })
+            .eq('series_id', series.series_id),
+        supabaseRetryOptions('update macro_series_metadata', series.series_id)
+      );
+
+      if (metaError) {
+        // 値自体は投入済み。次回は last_value_date が古いまま再取得されるだけなので警告に留める
+        logger.warn('Failed to update series metadata', {
+          seriesId: series.series_id,
+          error: metaError.message,
+        });
+      }
 
       logger.info('e-Stat series processed', {
         seriesId: series.series_id,
@@ -365,9 +420,13 @@ async function processMofSeries(
         continue;
       }
 
-      const { error } = await supabaseCore
-        .from('macro_indicator_daily')
-        .upsert(rows, { onConflict: 'indicator_date,series_id' });
+      const { error } = await withPostgrestRetry(
+        () =>
+          supabaseCore
+            .from('macro_indicator_daily')
+            .upsert(rows, { onConflict: 'indicator_date,series_id' }),
+        supabaseRetryOptions('upsert macro_indicator_daily', series.series_id)
+      );
 
       if (error) {
         logger.error('Failed to upsert MOF data', {
@@ -385,10 +444,21 @@ async function processMofSeries(
         rows[0].indicator_date
       );
 
-      await supabaseCore
-        .from('macro_series_metadata')
-        .update({ last_fetched_at: fetchedAt, last_value_date: maxDate })
-        .eq('series_id', series.series_id);
+      const { error: metaError } = await withPostgrestRetry(
+        () =>
+          supabaseCore
+            .from('macro_series_metadata')
+            .update({ last_fetched_at: fetchedAt, last_value_date: maxDate })
+            .eq('series_id', series.series_id),
+        supabaseRetryOptions('update macro_series_metadata', series.series_id)
+      );
+
+      if (metaError) {
+        logger.warn('Failed to update series metadata', {
+          seriesId: series.series_id,
+          error: metaError.message,
+        });
+      }
 
       logger.info('MOF series processed', {
         seriesId: series.series_id,
@@ -435,13 +505,11 @@ export async function handleCronD(
     const supabaseCore = createAdminClient('jquants_core');
 
     // macro_series_metadata から対象系列一覧を取得
-    let query = supabaseCore.from('macro_series_metadata').select('*');
-
-    if (source !== 'all') {
-      query = query.eq('source', source);
-    }
-
-    const { data: seriesList, error: fetchError } = await query;
+    // 一過性の 504 で Cron 全体が落ちないようリトライする
+    const { data: seriesList, error: fetchError } = await withPostgrestRetry(() => {
+      const query = supabaseCore.from('macro_series_metadata').select('*');
+      return source === 'all' ? query : query.eq('source', source);
+    }, supabaseRetryOptions('select macro_series_metadata', undefined, 3));
 
     if (fetchError) {
       throw new Error(`Failed to fetch series metadata: ${fetchError.message}`);

@@ -189,3 +189,89 @@ export async function fetchWithRetry(
     retryOptions
   );
 }
+
+/**
+ * PostgREST（supabase-js）応答の最小形
+ *
+ * @description supabase-js はネットワーク障害・5xx でも例外を投げず
+ * `{ error, status }` を返すため、戻り値を見てリトライ判定する
+ */
+export interface PostgrestLikeResult<T = unknown> {
+  data?: T | null;
+  error: { message: string } | null;
+  status?: number;
+}
+
+/**
+ * PostgREST で一時的障害とみなす 5xx 以外の HTTP ステータス
+ *
+ * @description 0 は fetch 自体の失敗（supabase-js が status=0 で返す）。
+ * 5xx は 520 等のプロキシ由来を含め既定で全てリトライ対象（{@link isTransientPostgrestStatus}）
+ */
+export const TRANSIENT_POSTGREST_STATUS_CODES = [0, 408, 429];
+
+/**
+ * PostgREST 応答のステータスが一時的障害かどうか（既定判定）
+ *
+ * @description 5xx 全域 + fetch 失敗(0) + 408/429 を一時的とみなす
+ */
+export function isTransientPostgrestStatus(status: number): boolean {
+  return TRANSIENT_POSTGREST_STATUS_CODES.includes(status) || (status >= 500 && status < 600);
+}
+
+/**
+ * Supabase(PostgREST) クエリを指数バックオフでリトライ実行する
+ *
+ * @param run クエリビルダーを毎回組み立てて返す関数（同じビルダーを使い回さないこと）
+ * @param options リトライ設定（retryStatusCodes を渡すとそのリストだけを対象にする。
+ * 既定は {@link isTransientPostgrestStatus} = 5xx 全域 + 0/408/429）
+ * @returns 最後に得られた PostgREST 応答（リトライ上限に達した場合はエラーを含んだまま返す）
+ *
+ * @example
+ * ```typescript
+ * const { data, error } = await withPostgrestRetry(() =>
+ *   supabase.from('macro_series_metadata').select('*')
+ * );
+ * ```
+ */
+export async function withPostgrestRetry<T extends PostgrestLikeResult>(
+  run: () => PromiseLike<T>,
+  options?: RetryOptions
+): Promise<T> {
+  const {
+    maxRetries = 3,
+    baseDelayMs = 1000,
+    maxDelayMs = 8000,
+    jitterMs = 100,
+    retryStatusCodes,
+    onRetry,
+  } = options ?? {};
+
+  // 明示指定があればそのリストのみ、無指定なら 5xx 全域 + 0/408/429
+  const isTransient = (status: number): boolean =>
+    retryStatusCodes ? retryStatusCodes.includes(status) : isTransientPostgrestStatus(status);
+
+  let result = await run();
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (!result.error) {
+      return result;
+    }
+
+    // status が無い応答（= 業務エラー相当）はリトライしない
+    if (result.status === undefined || !isTransient(result.status)) {
+      return result;
+    }
+
+    const delayMs = calculateDelay(attempt, baseDelayMs, maxDelayMs, jitterMs);
+
+    if (onRetry) {
+      onRetry(attempt + 1, new Error(result.error.message), delayMs);
+    }
+
+    await sleep(delayMs);
+    result = await run();
+  }
+
+  return result;
+}

@@ -566,6 +566,56 @@ describe('cron/handlers/macro.ts', () => {
       );
     });
 
+    it('metadata取得が一時的な504ならリトライして成功する', async () => {
+      const fredSeries = [{
+        series_id: 'vixcls',
+        source: 'fred',
+        source_series_id: 'VIXCLS',
+        source_filter: null,
+        frequency: 'daily',
+        last_value_date: '2024-01-10',
+      }];
+      let selectAttempts = 0;
+
+      mockCreateAdminClient.mockReturnValue({
+        from: vi.fn(() => {
+          const builder: any = {};
+          builder.select = vi.fn(() => builder);
+          builder.update = vi.fn(() => builder);
+          builder.eq = vi.fn(() => builder);
+          builder.upsert = vi.fn().mockResolvedValue({ error: null });
+          builder.then = (resolve: any) => {
+            selectAttempts += 1;
+            if (selectAttempts === 1) {
+              // Supabase ゲートウェイの一過性障害（2026-09-12 の Cron D 失敗と同じ形）
+              return resolve({ data: null, error: { message: 'Gateway Timeout' }, status: 504 });
+            }
+            return resolve({ data: fredSeries, error: null, status: 200 });
+          };
+          return builder;
+        }),
+      });
+      mockIsMonthlyOrLower.mockReturnValue(false);
+      mockFredClient.getSeriesObservations.mockResolvedValue({
+        observations: [],
+        skippedCount: 0,
+      });
+
+      vi.useFakeTimers();
+      try {
+        const resultPromise = handleCronD('fred', 'run-504');
+        await vi.advanceTimersByTimeAsync(2000);
+        const result = await resultPromise;
+
+        expect(result.success).toBe(true);
+        expect(result.seriesProcessed).toBe(1);
+        expect(selectAttempts).toBe(2);
+        expect(mockSendJobFailureEmail).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('エラー時にメール通知を送信する', async () => {
       mockCreateAdminClient.mockReturnValue({
         from: vi.fn(() => ({
