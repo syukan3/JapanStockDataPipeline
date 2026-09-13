@@ -4,8 +4,10 @@
  * @description job_runs, job_run_items テーブルへのCRUD操作
  */
 
+import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createLogger } from '../utils/logger';
+import { withPostgrestRetry } from '../utils/retry';
 
 const logger = createLogger({ module: 'job-run' });
 
@@ -45,6 +47,50 @@ interface StartJobRunBaseOptions {
   reclaimStaleAfterSeconds?: number;
   /** 指定秒数より古い success run を再観測のため再取得する */
   reclaimSuccessAfterSeconds?: number;
+}
+
+/**
+ * running 行が1件も無いか（＝直前の claim はコミットしていないと言い切れるか）。
+ *
+ * 取りこぼした claim が実はコミット済みだと、投げ直しても `already_executed` が返って
+ * ジョブが「何もせず正常終了」してしまう。running 行があるとき、および判定自体が
+ * できなかったときはフェイルクローズし、従来どおり失敗を見せる。
+ */
+async function noRunningJobRun(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any, any, any>,
+  jobName: JobName,
+  targetDate: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('job_runs')
+    .select('status')
+    .eq('job_name', jobName)
+    .eq('target_date', targetDate)
+    .maybeSingle();
+  if (error) return false;
+  if (!data) return true;
+  return data.status !== 'running';
+}
+
+/**
+ * この attempt がまだ running のままか（＝直前の完了要求はコミットしていないか）。
+ *
+ * 判定できないときは false を返してフェイルクローズする。
+ */
+async function attemptStillRunning(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any, any, any>,
+  runId: string,
+  attemptId: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('job_runs')
+    .select('status, attempt_id')
+    .eq('run_id', runId)
+    .maybeSingle();
+  if (error || !data) return false;
+  return data.status === 'running' && data.attempt_id === attemptId;
 }
 
 export type StartJobRunOptions =
@@ -109,15 +155,21 @@ export async function startJobRun(
       };
     }
 
-    const { data: claimData, error: claimError } = await supabase.rpc(
-      'claim_job_run',
+    const { data: claimData, error: claimError } = await withPostgrestRetry(
+      () =>
+        supabase.rpc('claim_job_run', {
+          p_job_name: jobName,
+          p_target_date: targetDate,
+          p_meta: meta,
+          p_running_stale_after_seconds: reclaimStaleAfterSeconds ?? null,
+          p_success_stale_after_seconds: reclaimSuccessAfterSeconds ?? null,
+          p_coverage_dataset: coverageDataset ?? null,
+        }),
       {
-        p_job_name: jobName,
-        p_target_date: targetDate,
-        p_meta: meta,
-        p_running_stale_after_seconds: reclaimStaleAfterSeconds ?? null,
-        p_success_stale_after_seconds: reclaimSuccessAfterSeconds ?? null,
-        p_coverage_dataset: coverageDataset ?? null,
+        maxRetries: 2,
+        isRetrySafe: () => noRunningJobRun(supabase, jobName, targetDate),
+        onRetry: (attempt, error, delayMs) =>
+          logger.warn('Retrying job claim', { jobName, targetDate, attempt, delayMs, error: error.message }),
       }
     );
 
@@ -171,20 +223,28 @@ export async function startJobRun(
     return { runId: claim.run_id, attemptId: claim.attempt_id };
   }
 
-  const { data, error } = await supabase
-    .from('job_runs')
-    .insert({
-      job_name: jobName,
-      target_date: targetDate ?? null,
-      status: 'running',
-      meta,
-    })
-    .select('run_id')
-    .single();
+  // run_id をこちらで採番し、同じ id の再送は ignoreDuplicates で吸収させる。
+  // こうしないと、取りこぼした1回目がコミット済みだったときに
+  // （target_date が null の Cron A/C では部分ユニーク制約も効かず）running 行が2本できる。
+  const newRunId = randomUUID();
+  const { error } = await withPostgrestRetry(
+    () =>
+      supabase.from('job_runs').upsert(
+        {
+          run_id: newRunId,
+          job_name: jobName,
+          target_date: targetDate ?? null,
+          status: 'running',
+          meta,
+        },
+        { onConflict: 'run_id', ignoreDuplicates: true }
+      ),
+    { maxRetries: 2 }
+  );
 
   if (!error) {
-    logger.info('Job run started', { jobName, targetDate, runId: data.run_id });
-    return { runId: data.run_id };
+    logger.info('Job run started', { jobName, targetDate, runId: newRunId });
+    return { runId: newRunId };
   }
 
   // 冪等性: 同一 job_name + target_date の行が既存（uq_job_runs_job_target は target_date が
@@ -258,13 +318,22 @@ export async function completeJobRun(
     : undefined;
 
   if (attemptId) {
-    const { data, error } = await supabase.rpc('complete_job_run_attempt', {
-      p_run_id: runId,
-      p_attempt_id: attemptId,
-      p_status: status,
-      p_error_message: normalizedError ?? null,
-      p_heartbeat_meta: heartbeatMeta ?? {},
-    });
+    // 取りこぼした1回目が実は通っていた場合、投げ直すと status が running でなくなっていて
+    // false が返り「他の attempt に追い越された」と誤認する。まだ running のときだけ投げ直す。
+    const { data, error } = await withPostgrestRetry(
+      () =>
+        supabase.rpc('complete_job_run_attempt', {
+          p_run_id: runId,
+          p_attempt_id: attemptId,
+          p_status: status,
+          p_error_message: normalizedError ?? null,
+          p_heartbeat_meta: heartbeatMeta ?? {},
+        }),
+      {
+        maxRetries: 2,
+        isRetrySafe: () => attemptStillRunning(supabase, runId, attemptId),
+      }
+    );
 
     if (error) {
       logger.error('Failed to complete fenced job run', {
@@ -330,17 +399,26 @@ export async function startJobRunItem(
 ): Promise<void> {
   logger.debug('Starting job run item', { runId, dataset });
 
-  const { error } = await supabase
-    .from('job_run_items')
-    .insert({
-      run_id: runId,
-      dataset,
-      status: 'running',
-      meta: meta ?? {},
-    });
+  // PK(run_id, dataset) があるので、二重に届いても2回目は 23505 になるだけ
+  const { error } = await withPostgrestRetry(
+    () =>
+      supabase.from('job_run_items').insert({
+        run_id: runId,
+        dataset,
+        status: 'running',
+        meta: meta ?? {},
+      }),
+    { maxRetries: 2 }
+  );
 
   if (error) {
-    logger.error('Failed to start job run item', { runId, dataset, error });
+    // 23505 = 同一 (run_id, dataset) が既にある。瞬断で投げ直したときに起こりうるが、
+    // 目的の行は存在しているので失敗ではない
+    if (error.code === '23505') {
+      logger.debug('Job run item already exists', { runId, dataset });
+    } else {
+      logger.error('Failed to start job run item', { runId, dataset, error });
+    }
   }
 }
 

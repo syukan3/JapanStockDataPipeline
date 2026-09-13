@@ -24,68 +24,53 @@ describe('cron/job-run.ts', () => {
   });
 
   describe('startJobRun', () => {
-    it('ジョブ実行を開始してrun_idを返す', async () => {
-      const mockSupabase = {
-        from: vi.fn(() => ({
-          insert: vi.fn().mockReturnThis(),
-          select: vi.fn().mockReturnThis(),
-          single: vi.fn().mockResolvedValue({
-            data: { run_id: 'test-run-id-123' },
-            error: null,
-          }),
-        })),
-      };
+    // run_id は投げ直しを冪等にするためクライアント側で採番する
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-      const result = await startJobRun(mockSupabase as any, {
+    function upsertClient(result: { error: unknown } = { error: null }) {
+      const upsert = vi.fn().mockResolvedValue(result);
+      return { upsert, client: { from: vi.fn(() => ({ upsert })) } };
+    }
+
+    it('ジョブ実行を開始してrun_idを返す', async () => {
+      const { upsert, client } = upsertClient();
+
+      const result = await startJobRun(client as any, {
         jobName: 'cron_a',
         targetDate: '2024-01-15',
       });
 
-      expect(result.runId).toBe('test-run-id-123');
+      expect(result.runId).toMatch(UUID_RE);
       expect(result.error).toBeUndefined();
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ run_id: result.runId, job_name: 'cron_a', status: 'running' }),
+        { onConflict: 'run_id', ignoreDuplicates: true }
+      );
     });
 
     it('targetDateなしでも実行できる', async () => {
-      const mockSupabase = {
-        from: vi.fn(() => ({
-          insert: vi.fn().mockReturnThis(),
-          select: vi.fn().mockReturnThis(),
-          single: vi.fn().mockResolvedValue({
-            data: { run_id: 'test-run-id-456' },
-            error: null,
-          }),
-        })),
-      };
+      const { client } = upsertClient();
 
-      const result = await startJobRun(mockSupabase as any, {
+      const result = await startJobRun(client as any, {
         jobName: 'cron_b',
       });
 
-      expect(result.runId).toBe('test-run-id-456');
+      expect(result.runId).toMatch(UUID_RE);
     });
 
     it('metaデータを渡せる', async () => {
-      const insertMock = vi.fn().mockReturnThis();
-      const mockSupabase = {
-        from: vi.fn(() => ({
-          insert: insertMock,
-          select: vi.fn().mockReturnThis(),
-          single: vi.fn().mockResolvedValue({
-            data: { run_id: 'test-run-id' },
-            error: null,
-          }),
-        })),
-      };
+      const { upsert, client } = upsertClient();
 
-      await startJobRun(mockSupabase as any, {
+      await startJobRun(client as any, {
         jobName: 'cron_a',
         meta: { source: 'manual', user: 'admin' },
       });
 
-      expect(insertMock).toHaveBeenCalledWith(
+      expect(upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           meta: { source: 'manual', user: 'admin' },
-        })
+        }),
+        { onConflict: 'run_id', ignoreDuplicates: true }
       );
     });
 
@@ -124,14 +109,79 @@ describe('cron/job-run.ts', () => {
       });
     });
 
+    it('claimが504でもrunning行が無ければ投げ直す', async () => {
+      const rpc = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: { message: 'Gateway Timeout' }, status: 504 })
+        .mockResolvedValueOnce({
+          data: [{ run_id: 'run-1', attempt_id: 'attempt-1', claimed: true, reason: 'inserted' }],
+          error: null,
+        });
+      const from = vi.fn(() => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }));
+
+      const resultPromise = startJobRun({ rpc, from } as any, {
+        jobName: 'cron_b',
+        targetDate: '2024-01-16',
+        reclaimStaleAfterSeconds: 60,
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await resultPromise;
+
+      expect(result).toEqual({ runId: 'run-1', attemptId: 'attempt-1' });
+      expect(rpc).toHaveBeenCalledTimes(2);
+    });
+
+    it('504で取りこぼしても、同じrun_idの再送なので running 行は増えない', async () => {
+      const upsert = vi
+        .fn()
+        .mockResolvedValueOnce({ error: { message: 'Gateway Timeout' }, status: 504 })
+        .mockResolvedValueOnce({ error: null });
+      const client = { from: vi.fn(() => ({ upsert })) };
+
+      const resultPromise = startJobRun(client as any, { jobName: 'cron_a' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await resultPromise;
+
+      expect(result.error).toBeUndefined();
+      expect(upsert).toHaveBeenCalledTimes(2);
+      // 2回とも同じ run_id を送っているので、1回目がコミット済みでも重複行にならない
+      const [first] = upsert.mock.calls[0];
+      const [second] = upsert.mock.calls[1];
+      expect(second.run_id).toBe(first.run_id);
+      expect(result.runId).toBe(first.run_id);
+    });
+
+    it('claim取りこぼし後にrunning行があれば投げ直さない（黙殺を防ぐ）', async () => {
+      const rpc = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: { message: 'Gateway Timeout' }, status: 504 });
+      const from = vi.fn(() => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: { status: 'running' }, error: null }),
+      }));
+
+      const result = await startJobRun({ rpc, from } as any, {
+        jobName: 'cron_b',
+        targetDate: '2024-01-16',
+        reclaimStaleAfterSeconds: 60,
+      });
+
+      expect(result.error).toContain('Gateway Timeout');
+      expect(rpc).toHaveBeenCalledTimes(1);
+    });
+
     it('同一日付の既存runを再取得してrun_idを返す（再ディスパッチ収束）', async () => {
       const single = vi.fn()
-        .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key value' } })
         .mockResolvedValueOnce({ data: { run_id: 'existing-run-id' }, error: null });
       const updateMock = vi.fn().mockReturnThis();
       const itemsDeleteEq = vi.fn().mockResolvedValue({ error: null });
       const jobRunsChain = {
-        insert: vi.fn().mockReturnThis(),
+        upsert: vi.fn().mockResolvedValue({ error: { code: '23505', message: 'duplicate key value' } }),
         update: updateMock,
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
@@ -161,12 +211,11 @@ describe('cron/job-run.ts', () => {
     });
 
     it('既存runがsuccess/running（failed以外）なら再取得せず実行済みを返す', async () => {
-      // insert → 23505、update(status=failed条件) → 0件(PGRST116) = 成功/実行中行は巻き戻さない
+      // upsert → 23505、update(status=failed条件) → 0件(PGRST116) = 成功/実行中行は巻き戻さない
       const single = vi.fn()
-        .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key value' } })
         .mockResolvedValueOnce({ data: null, error: { code: 'PGRST116', message: 'no rows' } });
       const jobRunsChain = {
-        insert: vi.fn().mockReturnThis(),
+        upsert: vi.fn().mockResolvedValue({ error: { code: '23505', message: 'duplicate key value' } }),
         update: vi.fn().mockReturnThis(),
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
@@ -291,10 +340,7 @@ describe('cron/job-run.ts', () => {
     it('targetDateなしの23505は再取得せずエラーを返す', async () => {
       const mockSupabase = {
         from: vi.fn(() => ({
-          insert: vi.fn().mockReturnThis(),
-          select: vi.fn().mockReturnThis(),
-          single: vi.fn().mockResolvedValue({
-            data: null,
+          upsert: vi.fn().mockResolvedValue({
             error: { code: '23505', message: 'duplicate key value' },
           }),
         })),
@@ -311,10 +357,7 @@ describe('cron/job-run.ts', () => {
     it('DBエラーの場合エラーを返す', async () => {
       const mockSupabase = {
         from: vi.fn(() => ({
-          insert: vi.fn().mockReturnThis(),
-          select: vi.fn().mockReturnThis(),
-          single: vi.fn().mockResolvedValue({
-            data: null,
+          upsert: vi.fn().mockResolvedValue({
             error: { code: 'P0001', message: 'Database error' },
           }),
         })),
@@ -430,6 +473,61 @@ describe('cron/job-run.ts', () => {
         p_error_message: null,
         p_heartbeat_meta: { fetched: 3, inserted: 3 },
       });
+    });
+
+    it('完了RPCが504でも、まだrunningなら投げ直す', async () => {
+      const rpc = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: { message: 'Gateway Timeout' }, status: 504 })
+        .mockResolvedValueOnce({ data: true, error: null });
+      const from = vi.fn(() => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi
+          .fn()
+          .mockResolvedValue({ data: { status: 'running', attempt_id: 'attempt-123' }, error: null }),
+      }));
+
+      const resultPromise = completeJobRun(
+        { rpc, from } as any,
+        'run-123',
+        'success',
+        undefined,
+        'attempt-123'
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(resultPromise).resolves.toEqual({ completed: true });
+      expect(rpc).toHaveBeenCalledTimes(2);
+    });
+
+    it('完了RPCの取りこぼし後にrunningでなければ投げ直さない（superseded誤認を防ぐ）', async () => {
+      const rpc = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: { message: 'Gateway Timeout' }, status: 504 });
+      const from = vi.fn(() => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        // 1回目が実は通っていて success になっているケース
+        maybeSingle: vi
+          .fn()
+          .mockResolvedValue({ data: { status: 'success', attempt_id: 'attempt-123' }, error: null }),
+      }));
+
+      const result = await completeJobRun(
+        { rpc, from } as any,
+        'run-123',
+        'success',
+        undefined,
+        'attempt-123'
+      );
+
+      expect(result).toEqual({
+        completed: false,
+        reason: 'db_error',
+        error: 'Gateway Timeout',
+      });
+      expect(rpc).toHaveBeenCalledTimes(1);
     });
 
     it('reclaim後の旧attempt完了を拒否する', async () => {

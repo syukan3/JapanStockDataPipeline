@@ -354,12 +354,13 @@ async function main(): Promise<void> {
 
   const { error: insertError } = await supabaseIngest
     .from('job_runs')
-    .insert({
+    // run_id はこちらで採番しているので、瞬断で投げ直されても重複行にならない
+    .upsert({
       run_id: runId,
       job_name: JOB_NAME,
       status: 'running',
       meta: { threshold_mb: thresholdMb, db_size_mb_before: Math.round(dbSizeMb) },
-    });
+    }, { onConflict: 'run_id', ignoreDuplicates: true });
 
   if (insertError) {
     throw new Error(`Failed to start job run: ${insertError.message}`);

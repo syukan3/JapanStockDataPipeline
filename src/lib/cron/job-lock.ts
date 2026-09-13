@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createLogger } from '../utils/logger';
+import { withPostgrestRetry } from '../utils/retry';
 
 const logger = createLogger({ module: 'job-lock' });
 
@@ -17,6 +18,32 @@ export interface LockResult {
   token?: string;
   /** エラーメッセージ */
   error?: string;
+}
+
+/**
+ * 現在のロック行の状態。
+ *
+ * - `mine`: 自分の lock_token が入っている（＝取りこぼした1回目が通っていた）
+ * - `none`: 行が無い（＝まだ誰も取っていないので投げ直してよい）
+ * - `other`: 他プロセスが握っている、または照会自体に失敗した（投げ直さない）
+ *
+ * lock_token は呼び出しごとに発行する冪等キーなので、レスポンスを取りこぼしても
+ * これで自分の insert が通ったかを判定できる。
+ */
+async function readLockState(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any, any, any>,
+  jobName: string,
+  token: string
+): Promise<'mine' | 'none' | 'other'> {
+  const { data, error } = await supabase
+    .from('job_locks')
+    .select('lock_token')
+    .eq('job_name', jobName)
+    .maybeSingle();
+  if (error) return 'other';
+  if (!data) return 'none';
+  return data.lock_token === token ? 'mine' : 'other';
 }
 
 /**
@@ -97,20 +124,35 @@ export async function acquireLock(
     }
 
     // 2. 新規ロックを作成
-    const { error: insertError } = await supabase
-      .from('job_locks')
-      .insert({
-        job_name: jobName,
-        locked_until: lockedUntil.toISOString(),
-        lock_token: token,
-        updated_at: now.toISOString(),
-      });
+    // 一過性エラーで取りこぼした場合、自分の lock_token が入っていれば「取得済み」と判断できる。
+    // そうでなければ他プロセスが握ったということなので、投げ直さず従来どおり失敗させる。
+    const { error: insertError } = await withPostgrestRetry(
+      () =>
+        supabase.from('job_locks').insert({
+          job_name: jobName,
+          locked_until: lockedUntil.toISOString(),
+          lock_token: token,
+          updated_at: now.toISOString(),
+        }),
+      {
+        maxRetries: 2,
+        // 行が無いと確認できたときだけ投げ直す（自分の token なら取得済み、
+        // 他プロセスの token なら投げ直しても 23505 になるだけ）
+        isRetrySafe: async () => (await readLockState(supabase, jobName, token)) === 'none',
+      }
+    );
 
     if (insertError) {
       // 同時に insert された可能性（一意制約違反）
       if (insertError.code === '23505') {
         logger.info('Lock already created by another process', { jobName });
         return { success: false, error: 'Lock already held by another process' };
+      }
+      // 一過性エラーでレスポンスを取りこぼした場合、自分の token が入っていれば
+      // 1回目が通っていたということなので取得済みとして扱う
+      if ((await readLockState(supabase, jobName, token)) === 'mine') {
+        logger.info('Lock acquired (recovered after transient error)', { jobName, token });
+        return { success: true, token };
       }
       logger.error('Failed to create lock', { jobName, error: insertError });
       return { success: false, error: insertError.message };

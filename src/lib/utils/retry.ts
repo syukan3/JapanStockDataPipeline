@@ -203,20 +203,22 @@ export interface PostgrestLikeResult<T = unknown> {
 }
 
 /**
- * PostgREST で一時的障害とみなす 5xx 以外の HTTP ステータス
+ * PostgREST で一時的障害とみなす HTTP ステータス
  *
  * @description 0 は fetch 自体の失敗（supabase-js が status=0 で返す）。
- * 5xx は 520 等のプロキシ由来を含め既定で全てリトライ対象（{@link isTransientPostgrestStatus}）
+ * 500 は含めない: PostgREST は SQL 例外（statement timeout・CHECK 違反など）も 500 で返すため、
+ * 投げ直しても同じ結果になるうえ、握り潰してはいけない不具合を隠してしまう。
+ * 520-524 は Cloudflare 系プロキシがオリジン異常時に返すもので 502/504 と同じ扱いでよい。
  */
-export const TRANSIENT_POSTGREST_STATUS_CODES = [0, 408, 429];
+export const TRANSIENT_POSTGREST_STATUS_CODES = [
+  0, 408, 429, 502, 503, 504, 520, 521, 522, 523, 524,
+];
 
 /**
  * PostgREST 応答のステータスが一時的障害かどうか（既定判定）
- *
- * @description 5xx 全域 + fetch 失敗(0) + 408/429 を一時的とみなす
  */
 export function isTransientPostgrestStatus(status: number): boolean {
-  return TRANSIENT_POSTGREST_STATUS_CODES.includes(status) || (status >= 500 && status < 600);
+  return TRANSIENT_POSTGREST_STATUS_CODES.includes(status);
 }
 
 /**
@@ -234,9 +236,20 @@ export function isTransientPostgrestStatus(status: number): boolean {
  * );
  * ```
  */
+export interface PostgrestRetryOptions extends RetryOptions {
+  /**
+   * 再試行してよいかを呼び出し側が判断するためのガード。
+   *
+   * クレーム取得のように「1回目が実はコミットしていた」場合に投げ直すと意味が変わる
+   * 操作で使う。DB の現在状態を読み、前回が無効だったと確認できたときだけ true を返すこと。
+   * 省略時は常に再試行する（冪等な操作向け）。
+   */
+  isRetrySafe?: () => Promise<boolean>;
+}
+
 export async function withPostgrestRetry<T extends PostgrestLikeResult>(
   run: () => PromiseLike<T>,
-  options?: RetryOptions
+  options?: PostgrestRetryOptions
 ): Promise<T> {
   const {
     maxRetries = 3,
@@ -263,6 +276,11 @@ export async function withPostgrestRetry<T extends PostgrestLikeResult>(
       return result;
     }
 
+    if (options?.isRetrySafe && !(await options.isRetrySafe())) {
+      // 状態が進んでいる（＝前回が効いていた可能性がある）ので投げ直さない
+      return result;
+    }
+
     const delayMs = calculateDelay(attempt, baseDelayMs, maxDelayMs, jitterMs);
 
     if (onRetry) {
@@ -274,4 +292,142 @@ export async function withPostgrestRetry<T extends PostgrestLikeResult>(
   }
 
   return result;
+}
+
+/** メソッドを取り出す（Request オブジェクト渡しにも対応） */
+function methodOf(input: RequestInfo | URL, init?: RequestInit): string {
+  if (init?.method) return init.method.toUpperCase();
+  if (typeof input === 'object' && input !== null && 'method' in input) {
+    return String((input as Request).method).toUpperCase();
+  }
+  return 'GET';
+}
+
+/** Prefer ヘッダを取り出す（PostgREST の upsert 判定に使う） */
+function preferOf(input: RequestInfo | URL, init?: RequestInit): string {
+  const raw =
+    init?.headers ??
+    (typeof input === 'object' && input !== null && 'headers' in input
+      ? (input as Request).headers
+      : undefined);
+  if (!raw) return '';
+  try {
+    return new Headers(raw as HeadersInit).get('prefer') ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 投げ直しても結果が変わらないリクエストか。
+ *
+ * - GET / HEAD: 読み取り
+ * - PATCH: PostgREST の update はリテラル値の代入なので二重に届いても同じ状態になる
+ * - POST + `Prefer: resolution=merge-duplicates`（= upsert）: onConflict で吸収される
+ *
+ * 素の POST（insert・RPC）と DELETE は、レスポンスを取りこぼしただけでサーバ側は
+ * コミット済みという場合に意味が変わるため対象外。冪等と分かっているものだけ
+ * 呼び出し側で {@link withPostgrestRetry} を使う。
+ * ストリーム本文は投げ直せないため、本文が文字列か空のときに限る。
+ */
+function isIdempotentRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  retryWrites: boolean
+): boolean {
+  const method = methodOf(input, init);
+  if (method === 'GET' || method === 'HEAD') return true;
+  if (!retryWrites) return false;
+
+  // 本文が再送できない形（ストリーム等）なら投げ直さない。
+  // Request オブジェクトに本文を持たせて渡された場合、1回目で消費済みなので同様に除外する
+  const initBody = init?.body;
+  if (initBody != null && typeof initBody !== 'string') return false;
+  if (
+    initBody == null &&
+    typeof input === 'object' &&
+    input !== null &&
+    'body' in input &&
+    (input as Request).body != null
+  ) {
+    return false;
+  }
+
+  if (method === 'PATCH') return true;
+  if (method === 'POST') return /resolution=(merge|ignore)-duplicates/i.test(preferOf(input, init));
+  return false;
+}
+
+/**
+ * 経路側（undici / ゲートウェイ）の瞬断と分かる例外メッセージ。
+ *
+ * これ以外の例外（AbortError、URL 不正など）は投げ直しても同じなので対象外。
+ */
+const TRANSIENT_FETCH_MESSAGE =
+  /fetch failed|socket hang up|other side closed|terminated|connect timeout|network|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR/i;
+
+export interface RetryingFetchOptions {
+  /** 総試行回数（初回を含む）。既定 3 */
+  maxAttempts?: number;
+  /** バックオフの基準待ち時間(ms)。既定 200 */
+  baseDelayMs?: number;
+  /**
+   * 冪等な書き込み（PATCH / upsert）も投げ直すか。既定 false（読み取りのみ）。
+   *
+   * 「保存後の状態が同じ」でも、UPDATE トリガーが監査行を作るようなテーブルでは
+   * 二重に副作用が起きる。true にしてよいのは、UPDATE の副作用が updated_at の
+   * 更新に留まると確認済みのスキーマだけ（jquants_core / jquants_ingest / analytics /
+   * scouter は結果テーブルのみで、監査トリガーを持つのは portfolio スキーマ）。
+   */
+  retryIdempotentWrites?: boolean;
+  /** 差し替え用（テスト） */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * 冪等なリクエストだけを一過性エラー時に投げ直す fetch を作る。
+ *
+ * @description Supabase クライアントに渡すと、全 Cron の読み取りが
+ * ゲートウェイの瞬断（504 等）を自動で乗り越えるようになる。
+ * `retryIdempotentWrites` を立てたときだけ upsert/update も対象に含める。
+ */
+export function createRetryingFetch(options: RetryingFetchOptions = {}): typeof fetch {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const baseDelayMs = options.baseDelayMs ?? 200;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const retryWrites = options.retryIdempotentWrites ?? false;
+
+  return async function retryingFetch(
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> {
+    const idempotent = isIdempotentRequest(input, init, retryWrites);
+
+    for (let attempt = 1; ; attempt++) {
+      let message: string;
+
+      try {
+        const response = await fetchImpl(input, init);
+        if (!idempotent || attempt === maxAttempts || !isTransientPostgrestStatus(response.status)) {
+          return response;
+        }
+        // 破棄するレスポンスのボディは読み切って接続を解放する
+        await response.arrayBuffer().catch(() => undefined);
+        message = `HTTP ${response.status}`;
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
+        // 中断（AbortSignal）は投げ直さない。同じ signal では即座に失敗するだけ
+        const aborted =
+          (e instanceof Error && e.name === 'AbortError') || Boolean(init?.signal?.aborted);
+        if (!idempotent || aborted || attempt === maxAttempts) throw e;
+        if (!TRANSIENT_FETCH_MESSAGE.test(message)) throw e;
+      }
+
+      const delayMs = calculateDelay(attempt - 1, baseDelayMs, 8000, 100);
+      console.warn(
+        `[supabase-fetch] transient error (attempt ${attempt}/${maxAttempts}): ${message} — retrying`
+      );
+      await sleep(delayMs);
+    }
+  };
 }

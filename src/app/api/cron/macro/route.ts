@@ -56,12 +56,13 @@ export async function POST(request: Request): Promise<Response> {
 
   const { error: insertError } = await supabaseIngest
     .from('job_runs')
-    .insert({
+    // run_id はこちらで採番しているので、瞬断で投げ直されても重複行にならない
+    .upsert({
       run_id: runId,
       job_name: JOB_NAME,
       status: 'running',
       meta: { source, backfill_days },
-    });
+    }, { onConflict: 'run_id', ignoreDuplicates: true });
 
   if (insertError) {
     logger.error('Failed to start job run', { error: insertError.message });

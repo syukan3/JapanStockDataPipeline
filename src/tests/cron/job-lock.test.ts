@@ -127,6 +127,62 @@ describe('cron/job-lock.ts', () => {
       expect(result.error).toBe('Lock already held by another process');
     });
 
+    it('一過性エラーでも自分のtokenでロックが取れていれば成功扱い', async () => {
+      const mockSupabase = {
+        from: vi.fn(() => ({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: 'PGRST116' },
+          }),
+          // 取りこぼした1回目が実はコミットしていたケース
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { lock_token: 'mock-uuid-token' },
+            error: null,
+          }),
+          insert: vi.fn().mockResolvedValue({
+            error: { message: 'Gateway Timeout' },
+            status: 504,
+          }),
+        })),
+      };
+
+      const result = await acquireLock(mockSupabase as any, 'cron_a');
+
+      expect(result.success).toBe(true);
+      expect(result.token).toBe('mock-uuid-token');
+    });
+
+    it('一過性エラーで他プロセスのロックなら投げ直さずに失敗', async () => {
+      const insertMock = vi.fn().mockResolvedValue({
+        error: { message: 'Gateway Timeout' },
+        status: 504,
+      });
+      const mockSupabase = {
+        from: vi.fn(() => ({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: 'PGRST116' },
+          }),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { lock_token: 'someone-else' },
+            error: null,
+          }),
+          insert: insertMock,
+        })),
+      };
+
+      const result = await acquireLock(mockSupabase as any, 'cron_a');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Gateway Timeout');
+      // 他プロセスが握っているので投げ直さない
+      expect(insertMock).toHaveBeenCalledTimes(1);
+    });
+
     it('DBエラーの場合は失敗', async () => {
       const mockSupabase = {
         from: vi.fn(() => ({

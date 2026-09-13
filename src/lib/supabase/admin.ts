@@ -12,6 +12,24 @@
  * @see https://supabase.com/docs/guides/database/connecting-to-postgres#connection-pooler
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createRetryingFetch } from '../utils/retry';
+
+/**
+ * 一過性エラー（ゲートウェイの瞬断）を投げ直す fetch。
+ *
+ * 2026-09-12 の Supabase 障害のように、504 が1回返るだけで Cron 全体が落ちるのを防ぐ。
+ * insert・RPC は取りこぼしとコミット済みを区別できないため、いずれも投げ直さない。
+ */
+const retryingReadFetch = createRetryingFetch();
+
+/**
+ * 読み取りに加えて upsert / update も投げ直す fetch。
+ *
+ * これらのスキーマの UPDATE トリガーは updated_at の更新だけで、監査行を作ったり
+ * 通知を飛ばしたりしない（監査・リビジョン記録を持つのは portfolio スキーマで、
+ * そちらは読み取り専用の retryingReadFetch を使う）。
+ */
+const retryingWriteFetch = createRetryingFetch({ retryIdempotentWrites: true });
 
 type SchemaName = 'jquants_core' | 'jquants_ingest' | 'analytics' | 'portfolio' | 'public';
 
@@ -56,12 +74,16 @@ function getSupabaseClient(schema: SchemaName): AnySupabaseClient {
   if (!clientCache.has(schema)) {
     const { url, key } = validateEnv();
 
+    // portfolio は監査・リビジョン記録のトリガーを持つので、書き込みは投げ直さない
+    const fetchImpl = schema === 'portfolio' ? retryingReadFetch : retryingWriteFetch;
+
     const options = schema === 'public'
       ? {
           auth: {
             persistSession: false,
             autoRefreshToken: false,
           },
+          global: { fetch: fetchImpl },
         }
       : {
           auth: {
@@ -71,6 +93,7 @@ function getSupabaseClient(schema: SchemaName): AnySupabaseClient {
           db: {
             schema,
           },
+          global: { fetch: fetchImpl },
         };
 
     clientCache.set(schema, createClient(url, key, options));

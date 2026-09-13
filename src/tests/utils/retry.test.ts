@@ -5,6 +5,7 @@ import {
   withRetry,
   fetchWithRetry,
   withPostgrestRetry,
+  createRetryingFetch,
   isTransientPostgrestStatus,
   TRANSIENT_POSTGREST_STATUS_CODES,
 } from '@/lib/utils/retry';
@@ -488,6 +489,17 @@ describe('retry.ts', () => {
       expect(run).toHaveBeenCalledTimes(3); // 初回 + リトライ2回
     });
 
+    it('500（SQL例外）はリトライしない', async () => {
+      const run = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: { message: 'statement timeout' }, status: 500 });
+
+      const result = await withPostgrestRetry(run, { maxRetries: 2, baseDelayMs: 100, jitterMs: 0 });
+
+      expect(result.error?.message).toBe('statement timeout');
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
     it('プロキシ由来の 5xx（520等）もリトライする', async () => {
       const run = vi
         .fn()
@@ -523,14 +535,166 @@ describe('retry.ts', () => {
       expect(run).toHaveBeenCalledTimes(1);
     });
 
-    it('isTransientPostgrestStatus は 5xx と 0/408/429 を一時的とみなす', () => {
-      for (const status of [0, 408, 429, 500, 502, 503, 504, 520, 599]) {
+    it('isTransientPostgrestStatus はゲートウェイ由来だけを一時的とみなす', () => {
+      for (const status of [0, 408, 429, 502, 503, 504, 520, 524]) {
         expect(isTransientPostgrestStatus(status)).toBe(true);
       }
-      for (const status of [200, 400, 401, 404, 409, 422]) {
+      // 500 は SQL 例外（statement timeout 等）でも返るので投げ直さない
+      for (const status of [200, 400, 401, 404, 409, 422, 500]) {
         expect(isTransientPostgrestStatus(status)).toBe(false);
       }
-      expect(TRANSIENT_POSTGREST_STATUS_CODES).toEqual([0, 408, 429]);
+      expect(TRANSIENT_POSTGREST_STATUS_CODES).toContain(504);
+    });
+  });
+  describe('createRetryingFetch', () => {
+    function response(status: number): Response {
+      return new Response(status === 204 ? null : 'body', { status });
+    }
+
+    it('GET の 504 は投げ直す', async () => {
+      const fetchImpl = vi.fn().mockResolvedValueOnce(response(504)).mockResolvedValue(response(200));
+      const retryingFetch = createRetryingFetch({ fetchImpl, baseDelayMs: 0 });
+
+      const res = await retryingFetch('https://example.invalid/rest/v1/x');
+      expect(res.status).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('upsert（Prefer: resolution=merge-duplicates）は投げ直す', async () => {
+      const fetchImpl = vi.fn().mockResolvedValueOnce(response(503)).mockResolvedValue(response(201));
+      const retryingFetch = createRetryingFetch({
+        fetchImpl,
+        baseDelayMs: 0,
+        retryIdempotentWrites: true,
+      });
+
+      const res = await retryingFetch('https://example.invalid/rest/v1/macro_indicator_daily', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal,resolution=merge-duplicates' },
+        body: '[{"a":1}]',
+      });
+      expect(res.status).toBe(201);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('PATCH（update）は投げ直す', async () => {
+      const fetchImpl = vi.fn().mockResolvedValueOnce(response(504)).mockResolvedValue(response(204));
+      const retryingFetch = createRetryingFetch({
+        fetchImpl,
+        baseDelayMs: 0,
+        retryIdempotentWrites: true,
+      });
+
+      const res = await retryingFetch('https://example.invalid/rest/v1/job_runs?run_id=eq.1', {
+        method: 'PATCH',
+        body: '{"status":"success"}',
+      });
+      expect(res.status).toBe(204);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('既定では upsert / update も投げ直さない（読み取り専用）', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(response(504));
+      const retryingFetch = createRetryingFetch({ fetchImpl, baseDelayMs: 0 });
+
+      const upsert = await retryingFetch('https://example.invalid/rest/v1/x', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates' },
+        body: '[{"a":1}]',
+      });
+      const patch = await retryingFetch('https://example.invalid/rest/v1/x?id=eq.1', {
+        method: 'PATCH',
+        body: '{"a":1}',
+      });
+
+      expect(upsert.status).toBe(504);
+      expect(patch.status).toBe(504);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('素の POST（insert・RPC）は投げ直さない', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(response(504));
+      const retryingFetch = createRetryingFetch({ fetchImpl, baseDelayMs: 0 });
+
+      const res = await retryingFetch('https://example.invalid/rest/v1/rpc/claim_job_run', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: '{}',
+      });
+      expect(res.status).toBe(504);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('GET の 500 は投げ直さない（SQL例外を隠さない）', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(response(500));
+      const retryingFetch = createRetryingFetch({ fetchImpl, baseDelayMs: 0 });
+
+      const res = await retryingFetch('https://example.invalid/rest/v1/x');
+      expect(res.status).toBe(500);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('GET の経路例外は投げ直し、使い切ったら rethrow する', async () => {
+      const fetchImpl = vi.fn().mockRejectedValue(new Error('fetch failed'));
+      const retryingFetch = createRetryingFetch({ fetchImpl, baseDelayMs: 0, maxAttempts: 3 });
+
+      await expect(retryingFetch('https://example.invalid/rest/v1/x')).rejects.toThrow('fetch failed');
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+
+    it('本文つき Request は投げ直さない（1回目で消費済みのため）', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(response(503));
+      const retryingFetch = createRetryingFetch({
+        fetchImpl,
+        baseDelayMs: 0,
+        retryIdempotentWrites: true,
+      });
+
+      const request = new Request('https://example.invalid/rest/v1/job_runs', {
+        method: 'PATCH',
+        body: '{"status":"success"}',
+      });
+      const res = await retryingFetch(request);
+
+      expect(res.status).toBe(503);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('AbortError は投げ直さない', async () => {
+      const abortError = new Error('This operation was aborted');
+      abortError.name = 'AbortError';
+      const fetchImpl = vi.fn().mockRejectedValue(abortError);
+      const retryingFetch = createRetryingFetch({ fetchImpl, baseDelayMs: 0 });
+
+      await expect(retryingFetch('https://example.invalid/rest/v1/x')).rejects.toThrow(
+        'This operation was aborted'
+      );
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('経路由来でない例外は投げ直さない', async () => {
+      const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Invalid URL'));
+      const retryingFetch = createRetryingFetch({ fetchImpl, baseDelayMs: 0 });
+
+      await expect(retryingFetch('https://example.invalid/rest/v1/x')).rejects.toThrow('Invalid URL');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('本文がストリームなら投げ直さない（再送できないため）', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(response(504));
+      const retryingFetch = createRetryingFetch({
+        fetchImpl,
+        baseDelayMs: 0,
+        retryIdempotentWrites: true,
+      });
+
+      const res = await retryingFetch('https://example.invalid/rest/v1/x', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates' },
+        body: new ReadableStream(),
+      });
+      expect(res.status).toBe(504);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
     });
   });
 });
