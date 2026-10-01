@@ -332,3 +332,34 @@ export async function sendWorkflowFailureEmail(
     return false;
   }
 }
+
+/**
+ * 運用上の注意メール（J-Quants OFF 中の代替データの異常・分割検知・カレンダー残り日数など）
+ *
+ * @description ジョブ失敗ではないが人の対応が要るものを知らせる。送信失敗はジョブを止めない。
+ */
+export async function sendOpsNoticeEmail(subject: string, lines: string[]): Promise<boolean> {
+  const resend = getResendClient();
+  const to = getAlertEmailTo();
+  if (!resend || !to) {
+    logger.info('Ops notice email skipped (not configured)', { subject });
+    return false;
+  }
+  const html = `<p>${lines.map((l) => escapeHtml(l)).join('<br>')}</p>`;
+  try {
+    const result = await resend.emails.send({
+      from: getEmailFrom(),
+      to: [to],
+      subject: `[JapanStock] ${subject}`,
+      html,
+    });
+    if (result.error) {
+      logger.error('Failed to send ops notice email', { subject, error: result.error });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    logger.error('Error sending ops notice email', { subject, error });
+    return false;
+  }
+}

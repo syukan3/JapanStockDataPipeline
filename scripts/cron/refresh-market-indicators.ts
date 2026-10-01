@@ -51,7 +51,10 @@ import {
   fillWeekly,
   fillDerived,
   fillRatio,
+  fillBreadthExternal,
 } from '../../src/lib/market/indicators-sync';
+import { fetchNikkei225jpDaily } from '../../src/lib/market/nikkei225jp-client';
+import { getJQuantsMode } from '../../src/lib/data-source/jquants-mode';
 import { syncShortRatio } from '../../src/lib/jquants/endpoints';
 
 /** 通常運転の走査窓（暦日）。祝日連休を挟んでも25営業日窓の再計算に足りる幅 */
@@ -92,11 +95,19 @@ async function main(): Promise<void> {
   if (onlyBreadth && skipBreadth) throw new Error('--only-breadth と --skip-breadth は併用不可');
   if (dryRun) logger.info('DRY RUN: 読み取り＋計算のみ。書き込みは行わない');
 
+  // J-Quants の ON/OFF（00132）。OFF 中は J-Quants 由来の空売り比率・breadth が作れないので代替へ回す。
+  // モードが読めなければ例外（推測で J-Quants を呼ばない／黙って代替に切り替えない）。
+  const mode = await getJQuantsMode({ fresh: true });
+
   // 空売り比率のソース切替ゲート。未設定（デフォルト）は現行の daily2 スクレイプのまま。
   // SHORT_RATIO_SOURCE=jquants で J-Quants 業種別データ（公式）へ切替える:
   //   daily2 は2成分の書き込みをスキップし、syncShortRatio→fillShortSellingOfficial が担当する。
-  const useOfficialShortRatio = process.env.SHORT_RATIO_SOURCE === 'jquants';
+  // J-Quants OFF 中は env の指定にかかわらず daily2 を使う（公式経路は API を呼べず2成分が NULL のまま残るため）。
+  const useOfficialShortRatio = process.env.SHORT_RATIO_SOURCE === 'jquants' && mode.enabled;
   if (useOfficialShortRatio) logger.info('SHORT_RATIO_SOURCE=jquants: 空売り比率は公式データを使用');
+  if (process.env.SHORT_RATIO_SOURCE === 'jquants' && !mode.enabled) {
+    logger.warn('J-Quants OFF のため空売り比率は daily2（nikkei225jp）を使用');
+  }
 
   const core = createAdminClient('jquants_core');
   const analytics = createAdminClient('analytics');
@@ -123,10 +134,15 @@ async function main(): Promise<void> {
   const jstHour = Number(getJSTDateTime().slice(11, 13));
   const externalCap = jstHour >= 16 ? today : addDays(today, -1);
   const scanEnd = breadthEnd > externalCap ? breadthEnd : externalCap;
-  const windowStart = full
-    ? SERIES_START
-    : addDays(breadthEnd < externalCap ? breadthEnd : externalCap, -WINDOW_DAYS);
-  logger.info('Scan window', { windowStart, breadthEnd, externalCap, full });
+  // J-Quants OFF 中は breadthEnd（equity_bar_daily の最終日）が止まるので、それを起点にすると
+  // 走査窓が毎日伸び続ける。OFF 中は外部ソースの終端（externalCap）を起点にする。
+  const windowAnchor = mode.enabled
+    ? breadthEnd < externalCap
+      ? breadthEnd
+      : externalCap
+    : externalCap;
+  const windowStart = full ? SERIES_START : addDays(windowAnchor, -WINDOW_DAYS);
+  logger.info('Scan window', { windowStart, breadthEnd, externalCap, full, jquants: mode.enabled });
 
   // 2) 窓内の営業日と保存済み行。騰落レシオの25日窓用に、正準営業日軸は
   //    窓より70暦日（>24営業日）前から持つ。
@@ -160,12 +176,22 @@ async function main(): Promise<void> {
     } catch (e) {
       failures.push(`yahoo: ${message(e)}`);
     }
+    // OFF 中は breadth_external も daily2 を使うので、1回だけ取得して使い回す
+    let daily2Rows: Awaited<ReturnType<typeof fetchNikkei225jpDaily>> | undefined;
     try {
-      summary.daily2 = await fillDaily2(analytics, externalDays, rowMap, dryRun, undefined, {
+      if (!mode.enabled) daily2Rows = await fetchNikkei225jpDaily();
+      summary.daily2 = await fillDaily2(analytics, externalDays, rowMap, dryRun, daily2Rows, {
         skipShortSelling: useOfficialShortRatio,
       });
     } catch (e) {
       failures.push(`daily2: ${message(e)}`);
+    }
+    if (!mode.enabled) {
+      try {
+        summary.breadthExternal = await fillBreadthExternal(analytics, externalDays, rowMap, dryRun, daily2Rows);
+      } catch (e) {
+        failures.push(`breadth-external: ${message(e)}`);
+      }
     }
     if (useOfficialShortRatio) {
       try {

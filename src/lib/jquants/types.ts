@@ -613,6 +613,8 @@ export interface TradingCalendarRecord {
   calendar_date: string;
   hol_div: string;
   is_business_day: boolean;
+  /** jquants=公式 / generated=祝日CSVから生成（00133）。公式の同期は必ず 'jquants' を書く */
+  source?: 'jquants' | 'generated';
   ingested_at?: string;
 }
 
@@ -693,6 +695,8 @@ export interface TopixBarDailyRecord {
   high?: number;
   low?: number;
   close?: number;
+  /** jquants=公式 / proxy_etf_13060=1306 ETF からの推計（00133）。公式の同期は必ず 'jquants' を書く */
+  source?: 'jquants' | 'proxy_etf_13060';
   ingested_at?: string;
 }
 
@@ -816,6 +820,8 @@ export interface InvestorTypeTradingRecord {
   investor_type: string;
   metric: string;
   value_kjpy?: number;
+  /** jquants=J-Quants / jpx=JPX 週次Excel（00133）。J-Quants の同期は必ず 'jquants' を書く */
+  source?: 'jquants' | 'jpx';
   ingested_at?: string;
 }
 

@@ -132,6 +132,8 @@ export function toInvestorTypeTradingRecords(
           investor_type: INVESTOR_TYPE_DB_NAMES[investorType],
           metric: METRIC_NAMES[metricKey],
           value_kjpy: value as number,
+          // upsert の DO UPDATE では DEFAULT が効かないので明示する（JPX 行を上書きしたとき source も戻す）
+          source: 'jquants',
         });
       }
     }

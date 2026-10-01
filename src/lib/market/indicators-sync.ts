@@ -468,6 +468,94 @@ export function planDaily2Updates(
 }
 
 // ============================================================
+// breadth_external（J-Quants OFF 中だけ）: 騰落レシオ25日・新高値・新安値を nikkei225jp daily2 で埋める
+//
+// OFF 中は equity_bar_daily が止まり自前計算（fillBreadth）ができない。daily2 の参照列
+// （col[7]/[8]/[9]）を保存し、breadth_source='nikkei225jp' で出所を残す（00133）。
+// 2025-07〜2026-09 の304日で、騰落レシオは自前計算との差の95%点が0.89pt。新高値/新安値は
+// 定義差で数件ずれるため、画面では出所を明示する。
+// 自前計算の値がある日（3列のどれかが非NULL）は触らない。ON 復帰時は jquants-restore が
+// breadth_source='nikkei225jp' の行を NULL に戻してから自前計算で埋め直す。
+// ============================================================
+
+/** 値域（逸脱した日は書かない） */
+const BREADTH_EXTERNAL_RANGE = {
+  advDecRatio: { min: 20, max: 400 },
+  highsLows: { min: 0, max: 5000 },
+} as const;
+
+export interface BreadthExternalRow {
+  as_of_date: string;
+  adv_dec_ratio_25d: number;
+  new_highs: number;
+  new_lows: number;
+  breadth_source: 'nikkei225jp';
+}
+
+/**
+ * breadth_external の更新payloadを組み立てる（純関数・テスト対象）
+ *
+ * - 3列とも保存値が NULL の日だけを対象にする（自前計算の値を上書きしない）
+ * - ソースの3列がそろい、値域に入っている日だけを書く（部分的な出所の混在を作らない）
+ */
+export function planBreadthExternalUpdates(
+  businessDays: string[],
+  rowMap: Map<string, IndicatorRow>,
+  srcRows: Array<{ date: string; refAdvDecRatio: number | null; refNewHighs: number | null; refNewLows: number | null }>
+): { rows: BreadthExternalRow[]; noSource: number; outOfRange: number } {
+  const src = new Map(srcRows.map((r) => [r.date, r]));
+  const rows: BreadthExternalRow[] = [];
+  let noSource = 0;
+  let outOfRange = 0;
+  const inRange = (v: number, r: { min: number; max: number }) => v >= r.min && v <= r.max;
+  for (const date of businessDays) {
+    const row = rowMap.get(date);
+    if (row && (row.adv_dec_ratio_25d != null || row.new_highs != null || row.new_lows != null)) continue;
+    const s = src.get(date);
+    if (!s || s.refAdvDecRatio == null || s.refNewHighs == null || s.refNewLows == null) {
+      noSource++;
+      continue;
+    }
+    if (
+      !inRange(s.refAdvDecRatio, BREADTH_EXTERNAL_RANGE.advDecRatio) ||
+      !inRange(s.refNewHighs, BREADTH_EXTERNAL_RANGE.highsLows) ||
+      !inRange(s.refNewLows, BREADTH_EXTERNAL_RANGE.highsLows)
+    ) {
+      outOfRange++;
+      continue;
+    }
+    rows.push({
+      as_of_date: date,
+      adv_dec_ratio_25d: s.refAdvDecRatio,
+      new_highs: s.refNewHighs,
+      new_lows: s.refNewLows,
+      breadth_source: 'nikkei225jp',
+    });
+  }
+  return { rows, noSource, outOfRange };
+}
+
+export async function fillBreadthExternal(
+  analytics: Client,
+  businessDays: string[],
+  rowMap: Map<string, IndicatorRow>,
+  dryRun: boolean,
+  prefetched?: Awaited<ReturnType<typeof fetchNikkei225jpDaily>>
+): Promise<Record<string, unknown>> {
+  const srcRows = prefetched ?? (await fetchNikkei225jpDaily());
+  const plan = planBreadthExternalUpdates(businessDays, rowMap, srcRows);
+  const stamp = { updated_at: new Date().toISOString() };
+  const upserted = await upsertRows(analytics, plan.rows.map((r) => ({ ...r, ...stamp })), dryRun);
+  for (const u of plan.rows) {
+    const r = getOrCreate(rowMap, u.as_of_date);
+    r.adv_dec_ratio_25d = u.adv_dec_ratio_25d;
+    r.new_highs = u.new_highs;
+    r.new_lows = u.new_lows;
+  }
+  return { upserted, noSource: plan.noSource, outOfRange: plan.outOfRange };
+}
+
+// ============================================================
 // short-selling official（J-Quants 業種別空売り比率の市場全体集計）
 //
 // SHORT_RATIO_SOURCE=jquants 時に analytics.short_selling_sector（全33業種の売り注文

@@ -9,6 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import { requireCronAuth } from '@/lib/cron/auth';
+import { jquantsGate } from '@/lib/cron/jquants-gate';
 import { acquireLock, releaseLock } from '@/lib/cron/job-lock';
 import { startJobRun, completeJobRun } from '@/lib/cron/job-run';
 import { updateHeartbeat } from '@/lib/cron/heartbeat';
@@ -30,6 +31,12 @@ export async function POST(request: Request): Promise<Response> {
   const authError = requireCronAuth(request);
   if (authError) {
     return authError;
+  }
+
+  // 1b. J-Quants OFF なら handler を作る前に止める（00132 のスイッチ。§3.4 最終防衛線）
+  const gated = await jquantsGate('/api/cron/jquants/c');
+  if (gated) {
+    return gated;
   }
 
   const supabaseIngest = createAdminClient('jquants_ingest');

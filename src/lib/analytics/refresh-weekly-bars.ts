@@ -290,7 +290,9 @@ export async function fetchDailyBarsForCodes(
   core: CoreClient,
   codes: string[],
   from: string,
-  to: string
+  to: string,
+  /** J-Quants OFF 中は統合ビュー（公式＋Yahoo。00133）から読む */
+  table: 'equity_bar_daily' | 'v_equity_price_daily' = 'equity_bar_daily'
 ): Promise<WeeklyBarSourceRow[]> {
   const rows: WeeklyBarSourceRow[] = [];
   if (codes.length === 0) return rows;
@@ -298,7 +300,7 @@ export async function fetchDailyBarsForCodes(
   for (const chunk of chunkArray(codes, CODE_CHUNK_SIZE)) {
     for (let offset = 0; ; offset += PAGE_SIZE) {
       const { data, error } = await core
-        .from('equity_bar_daily')
+        .from(table)
         .select(DAILY_COLUMNS)
         .eq('session', 'DAY')
         .in('local_code', chunk)
@@ -308,7 +310,7 @@ export async function fetchDailyBarsForCodes(
         .order('trade_date', { ascending: true })
         .range(offset, offset + PAGE_SIZE - 1);
       if (error) {
-        throw new Error(`equity_bar_daily の取得に失敗しました (${from}..${to}): ${error.message}`);
+        throw new Error(`${table} の取得に失敗しました (${from}..${to}): ${error.message}`);
       }
       const page = (data as WeeklyBarSourceRow[] | null) ?? [];
       rows.push(...page);
@@ -460,4 +462,56 @@ export function findWeeklyDailyMismatches(
     }
   }
   return mismatches;
+}
+
+/**
+ * J-Quants OFF 中の分割・併合イベント（Yahoo が報告した alt_split_events。00133）を検知窓内で拾う
+ *
+ * J-Quants と同じ意味の係数（ex-date に 1/比率）へ直して返す。週足の台帳 RPC に渡すと、
+ * 過去週への係数適用と台帳記録が行われる（イベント週の再集計は equity_bar_daily を読むため
+ * OFF 中は空振りするが、直後の直近2週の再集計が統合ビューから置き換える）。
+ * ON 復帰後に J-Quants の同じイベントが検知されても、台帳にあるので二重適用されない。
+ */
+export async function detectAltSplitEventsInWindow(
+  core: CoreClient,
+  codes: string[],
+  endDate: string,
+  lookbackDays: number = DETECT_LOOKBACK_DAYS
+): Promise<AdjustmentEvent[]> {
+  if (codes.length === 0) return [];
+  const startDate = subtractDays(endDate, lookbackDays);
+  const events: AdjustmentEvent[] = [];
+  for (const chunk of chunkArray(codes, CODE_CHUNK_SIZE)) {
+    const { data, error } = await core
+      .from('alt_split_events')
+      .select('local_code, ex_date, ratio')
+      .in('local_code', chunk)
+      .gte('ex_date', startDate)
+      .lte('ex_date', endDate)
+      .order('local_code', { ascending: true })
+      .order('ex_date', { ascending: true });
+    if (error) {
+      throw new Error(`alt_split_events の取得に失敗しました (${startDate}..${endDate}): ${error.message}`);
+    }
+    for (const r of (data ?? []) as Array<{ local_code: string; ex_date: string; ratio: number | string }>) {
+      const ratio = Number(r.ratio);
+      if (!Number.isFinite(ratio) || ratio <= 0) continue;
+      events.push({ local_code: r.local_code, trade_date: r.ex_date, adjustment_factor: 1 / ratio });
+    }
+  }
+  return events;
+}
+
+/** 追跡銘柄の統合ビュー上の最新取引日（J-Quants OFF 中の週足の終端） */
+export async function getLatestTrackedTradeDate(core: CoreClient, codes: string[]): Promise<string> {
+  const { data, error } = await core
+    .from('v_equity_price_daily')
+    .select('trade_date')
+    .in('local_code', codes)
+    .order('trade_date', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`v_equity_price_daily の最新日取得に失敗しました: ${error.message}`);
+  const latest = (data?.[0] as { trade_date: string } | undefined)?.trade_date;
+  if (!latest) throw new Error('追跡銘柄の価格が統合ビューに1行もありません');
+  return latest;
 }

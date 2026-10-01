@@ -14,6 +14,7 @@ import {
   syncWeeklyMarginInterestWithWindow,
   pruneWeeklyMarginInterest,
 } from '../../src/lib/jquants/endpoints/weekly-margin-interest';
+import { exitIfJQuantsOff } from '../../src/lib/data-source/script-guard';
 
 const JOB_NAME = 'weekly-margin' as const;
 
@@ -36,6 +37,8 @@ function validateEnv(): void {
 }
 
 async function main(): Promise<void> {
+  // J-Quants OFF（00132）なら API キーの検証より前に止める
+  await exitIfJQuantsOff('cron-f-direct');
   validateEnv();
 
   logger.info('Starting Cron F direct execution');

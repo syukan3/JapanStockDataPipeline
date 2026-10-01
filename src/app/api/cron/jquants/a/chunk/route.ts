@@ -16,6 +16,7 @@
 
 import { NextResponse } from 'next/server';
 import { requireCronAuth } from '@/lib/cron/auth';
+import { jquantsGate } from '@/lib/cron/jquants-gate';
 import { handleCronAChunk, CronAChunkRequestSchema } from '@/lib/cron/handlers';
 import { createLogger } from '@/lib/utils/logger';
 
@@ -30,6 +31,12 @@ export async function POST(request: Request): Promise<Response> {
   const authError = requireCronAuth(request);
   if (authError) {
     return authError;
+  }
+
+  // 1b. J-Quants OFF なら handler を作る前に止める（00132 のスイッチ。§3.4 最終防衛線）
+  const gated = await jquantsGate('/api/cron/jquants/a/chunk');
+  if (gated) {
+    return gated;
   }
 
   // 2. リクエストボディのパースとバリデーション

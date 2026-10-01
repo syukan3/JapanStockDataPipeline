@@ -22,7 +22,7 @@ const SOURCE_SERIES_ID: Record<(typeof TARGET_SERIES)[number], string> = {
 };
 
 async function main() {
-  loadEnv();
+  loadEnv({ requireJQuants: false });
 
   const argv = process.argv.slice(2);
   const dryRun = argv.includes('--dry-run');

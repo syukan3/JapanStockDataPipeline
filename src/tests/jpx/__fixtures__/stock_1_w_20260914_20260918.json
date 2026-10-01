@@ -1,0 +1,1808 @@
+{
+ "source": "JPX 投資部門別 株式売買状況 週次（2026-09-14〜18）の第1シートのセル値。expected は同週の J-Quants investor_type_trading",
+ "cells": {
+  "A1": "投資部門別 株式売買状況 Stocks by Investor Type",
+  "D3": "自己 Proprietary",
+  "L3": "委託 Brokerage",
+  "D4": "自己 Proprietary",
+  "L4": "個人 Individuals",
+  "T4": "海外投資家 Foreigners ",
+  "AB4": "証券会社 Securities Cos.",
+  "AF4": "法人 Institutions",
+  "D5": "現金取引 Cash",
+  "H5": "信用取引 Margin",
+  "L5": "現金取引 Cash",
+  "P5": "信用取引 Margin",
+  "T5": "法人 Institutions",
+  "X5": "個人 Individuals",
+  "AB5": "証券会社 Securities Cos.",
+  "AF5": "投資信託 Investment Trusts",
+  "AJ5": "事業法人 Business Cos. ",
+  "AN5": "その他法人等 Other Cos.",
+  "AR5": "金融機関 Financial Institutions",
+  "D6": "現金取引 Cash",
+  "H6": "信用取引 Margin",
+  "L6": "現金取引 Cash",
+  "P6": "信用取引 Margin",
+  "T6": "法人 Institutions",
+  "X6": "個人 Individuals",
+  "AB6": "証券会社 Securities Cos.",
+  "AF6": "投資信託 Investment Trusts",
+  "AJ6": "事業法人 Business Cos. ",
+  "AN6": "その他法人等 Other Cos.",
+  "AR6": "生保・損保 Life & Non-Life",
+  "AV6": "都銀・地銀等 City & Regional BK",
+  "AZ6": "信託銀行 Trust BK",
+  "BD6": "その他金融機関 Other Financials",
+  "A7": "年月週 Year, Month, Week",
+  "B7": "市場／Market",
+  "C7": "株数／金額 Shares／Value 千株／千円 1,000 Shares／1,000 yen",
+  "D7": "売 Sales",
+  "E7": "買 Purchases",
+  "F7": "差引 Balance",
+  "G7": "合計 Total",
+  "H7": "売 Sales",
+  "I7": "買 Purchases",
+  "J7": "差引 Balance",
+  "K7": "合計 Total",
+  "L7": "売 Sales",
+  "M7": "買 Purchases",
+  "N7": "差引 Balance",
+  "O7": "合計 Total",
+  "P7": "売 Sales",
+  "Q7": "買 Purchases",
+  "R7": "差引 Balance",
+  "S7": "合計 Total",
+  "T7": "売 Sales",
+  "U7": "買 Purchases",
+  "V7": "差引 Balance",
+  "W7": "合計 Total",
+  "X7": "売 Sales",
+  "Y7": "買 Purchases",
+  "Z7": "差引 Balance",
+  "AA7": "合計 Total",
+  "AB7": "売 Sales",
+  "AC7": "買 Purchases",
+  "AD7": "差引 Balance",
+  "AE7": "合計 Total",
+  "AF7": "売 Sales",
+  "AG7": "買 Purchases",
+  "AH7": "差引 Balance",
+  "AI7": "合計 Total",
+  "AJ7": "売 Sales",
+  "AK7": "買 Purchases",
+  "AL7": "差引 Balance",
+  "AM7": "合計 Total",
+  "AN7": "売 Sales",
+  "AO7": "買 Purchases",
+  "AP7": "差引 Balance",
+  "AQ7": "合計 Total",
+  "AR7": "売 Sales",
+  "AS7": "買 Purchases",
+  "AT7": "差引 Balance",
+  "AU7": "合計 Total",
+  "AV7": "売 Sales",
+  "AW7": "買 Purchases",
+  "AX7": "差引 Balance",
+  "AY7": "合計 Total",
+  "AZ7": "売 Sales",
+  "BA7": "買 Purchases",
+  "BB7": "差引 Balance",
+  "BC7": "合計 Total",
+  "BD7": "売 Sales",
+  "BE7": "買 Purchases",
+  "BF7": "差引 Balance",
+  "BG7": "合計 Total",
+  "A8": "2026093",
+  "B8": "東証プライム\r\nTSE Prime Market",
+  "C8": "株数 Shares",
+  "D8": 1388713,
+  "E8": 1991680,
+  "F8": 602967,
+  "G8": 3380393,
+  "H8": 53706,
+  "I8": 224,
+  "J8": -53482,
+  "K8": 53930,
+  "L8": 832529,
+  "M8": 731647,
+  "N8": -100882,
+  "O8": 1564176,
+  "P8": 1299479,
+  "Q8": 1227439,
+  "R8": -72040,
+  "S8": 2526918,
+  "T8": 8069218,
+  "U8": 7934629,
+  "V8": -134589,
+  "W8": 16003847,
+  "X8": 13616,
+  "Y8": 12897,
+  "Z8": -719,
+  "AA8": 26513,
+  "AB8": 33404,
+  "AC8": 29749,
+  "AD8": -3655,
+  "AE8": 63153,
+  "AF8": 321740,
+  "AG8": 199873,
+  "AH8": -121867,
+  "AI8": 521613,
+  "AJ8": 123979,
+  "AK8": 201310,
+  "AL8": 77331,
+  "AM8": 325289,
+  "AN8": 20711,
+  "AO8": 19361,
+  "AP8": -1350,
+  "AQ8": 40072,
+  "AR8": 25433,
+  "AS8": 4904,
+  "AT8": -20529,
+  "AU8": 30337,
+  "AV8": 81592,
+  "AW8": 6543,
+  "AX8": -75049,
+  "AY8": 88135,
+  "AZ8": 347233,
+  "BA8": 270708,
+  "BB8": -76525,
+  "BC8": 617941,
+  "BD8": 23807,
+  "BE8": 8336,
+  "BF8": -15471,
+  "BG8": 32143,
+  "C9": "金額 Value",
+  "D9": 3943522532,
+  "E9": 5597997582,
+  "F9": 1654475050,
+  "G9": 9541520114,
+  "H9": 161478915,
+  "I9": 962906,
+  "J9": -160516009,
+  "K9": 162441821,
+  "L9": 1913144225,
+  "M9": 1771704552,
+  "N9": -141439673,
+  "O9": 3684848777,
+  "P9": 8415922584,
+  "Q9": 8282412580,
+  "R9": -133510004,
+  "S9": 16698335164,
+  "T9": 27705008142,
+  "U9": 27031319853,
+  "V9": -673688289,
+  "W9": 54736327995,
+  "X9": 88338774,
+  "Y9": 90074853,
+  "Z9": 1736079,
+  "AA9": 178413627,
+  "AB9": 122141108,
+  "AC9": 114646332,
+  "AD9": -7494776,
+  "AE9": 236787440,
+  "AF9": 788445267,
+  "AG9": 645896260,
+  "AH9": -142549007,
+  "AI9": 1434341527,
+  "AJ9": 346797412,
+  "AK9": 513026472,
+  "AL9": 166229060,
+  "AM9": 859823884,
+  "AN9": 78707695,
+  "AO9": 81052140,
+  "AP9": 2344445,
+  "AQ9": 159759835,
+  "AR9": 69114020,
+  "AS9": 22736817,
+  "AT9": -46377203,
+  "AU9": 91850837,
+  "AV9": 205273400,
+  "AW9": 16344798,
+  "AX9": -188928602,
+  "AY9": 221618198,
+  "AZ9": 1084582620,
+  "BA9": 796079710,
+  "BB9": -288502910,
+  "BC9": 1880662330,
+  "BD9": 65400953,
+  "BE9": 33711645,
+  "BF9": -31689308,
+  "BG9": 99112598,
+  "B10": "東証スタンダード\r\nTSE Standard Market",
+  "C10": "株数 Shares",
+  "D10": 86263,
+  "E10": 94487,
+  "F10": 8224,
+  "G10": 180750,
+  "H10": 2203,
+  "I10": 12,
+  "J10": -2191,
+  "K10": 2215,
+  "L10": 1496428,
+  "M10": 822146,
+  "N10": -674282,
+  "O10": 2318574,
+  "P10": 320777,
+  "Q10": 986641,
+  "R10": 665864,
+  "S10": 1307418,
+  "T10": 368888,
+  "U10": 380656,
+  "V10": 11768,
+  "W10": 749544,
+  "X10": 3181,
+  "Y10": 3250,
+  "Z10": 69,
+  "AA10": 6431,
+  "AB10": 25151,
+  "AC10": 23431,
+  "AD10": -1720,
+  "AE10": 48582,
+  "AF10": 4501,
+  "AG10": 2168,
+  "AH10": -2333,
+  "AI10": 6669,
+  "AJ10": 17011,
+  "AK10": 18347,
+  "AL10": 1336,
+  "AM10": 35358,
+  "AN10": 2810,
+  "AO10": 1934,
+  "AP10": -876,
+  "AQ10": 4744,
+  "AR10": 588,
+  "AS10": 24,
+  "AT10": -564,
+  "AU10": 612,
+  "AV10": 365,
+  "AW10": 141,
+  "AX10": -224,
+  "AY10": 506,
+  "AZ10": 8546,
+  "BA10": 3609,
+  "BB10": -4937,
+  "BC10": 12155,
+  "BD10": 764,
+  "BE10": 52,
+  "BF10": -712,
+  "BG10": 816,
+  "C11": "金額 Value",
+  "D11": 112239139,
+  "E11": 124259368,
+  "F11": 12020229,
+  "G11": 236498507,
+  "H11": 2563243,
+  "I11": 27556,
+  "J11": -2535687,
+  "K11": 2590799,
+  "L11": 172704260,
+  "M11": 136432566,
+  "N11": -36271694,
+  "O11": 309136826,
+  "P11": 267606438,
+  "Q11": 279329447,
+  "R11": 11723009,
+  "S11": 546935885,
+  "T11": 450011119,
+  "U11": 472671604,
+  "V11": 22660485,
+  "W11": 922682723,
+  "X11": 2459989,
+  "Y11": 2253973,
+  "Z11": -206016,
+  "AA11": 4713962,
+  "AB11": 6500922,
+  "AC11": 5080191,
+  "AD11": -1420731,
+  "AE11": 11581113,
+  "AF11": 5904507,
+  "AG11": 5510953,
+  "AH11": -393554,
+  "AI11": 11415460,
+  "AJ11": 21546878,
+  "AK11": 21993284,
+  "AL11": 446406,
+  "AM11": 43540162,
+  "AN11": 2021903,
+  "AO11": 2343363,
+  "AP11": 321460,
+  "AQ11": 4365266,
+  "AR11": 1055155,
+  "AS11": 37704,
+  "AT11": -1017451,
+  "AU11": 1092859,
+  "AV11": 819873,
+  "AW11": 71933,
+  "AX11": -747940,
+  "AY11": 891806,
+  "AZ11": 10280330,
+  "BA11": 7316430,
+  "BB11": -2963900,
+  "BC11": 17596760,
+  "BD11": 1211810,
+  "BE11": 45140,
+  "BF11": -1166670,
+  "BG11": 1256950,
+  "B12": "東証グロース\r\nTSE Growth Market",
+  "C12": "株数 Shares",
+  "D12": 80677,
+  "E12": 92118,
+  "F12": 11441,
+  "G12": 172795,
+  "H12": 1566,
+  "I12": 11,
+  "J12": -1555,
+  "K12": 1577,
+  "L12": 406716,
+  "M12": 779021,
+  "N12": 372305,
+  "O12": 1185737,
+  "P12": 1278801,
+  "Q12": 894324,
+  "R12": -384477,
+  "S12": 2173125,
+  "T12": 315410,
+  "U12": 322758,
+  "V12": 7348,
+  "W12": 638168,
+  "X12": 4331,
+  "Y12": 4491,
+  "Z12": 160,
+  "AA12": 8822,
+  "AB12": 18650,
+  "AC12": 17403,
+  "AD12": -1247,
+  "AE12": 36053,
+  "AF12": 2367,
+  "AG12": 3242,
+  "AH12": 875,
+  "AI12": 5609,
+  "AJ12": 9807,
+  "AK12": 6420,
+  "AL12": -3387,
+  "AM12": 16227,
+  "AN12": 3387,
+  "AO12": 1381,
+  "AP12": -2006,
+  "AQ12": 4768,
+  "AR12": 1,
+  "AS12": 0,
+  "AT12": -1,
+  "AU12": 1,
+  "AV12": 35,
+  "AW12": 1,
+  "AX12": -34,
+  "AY12": 36,
+  "AZ12": 2563,
+  "BA12": 1727,
+  "BB12": -836,
+  "BC12": 4290,
+  "BD12": 181,
+  "BE12": 34,
+  "BF12": -147,
+  "BG12": 215,
+  "C13": "金額 Value",
+  "D13": 112921986,
+  "E13": 123025188,
+  "F13": 10103202,
+  "G13": 235947174,
+  "H13": 1517893,
+  "I13": 27232,
+  "J13": -1490661,
+  "K13": 1545125,
+  "L13": 195923200,
+  "M13": 182953930,
+  "N13": -12969270,
+  "O13": 378877130,
+  "P13": 402954121,
+  "Q13": 403575513,
+  "R13": 621392,
+  "S13": 806529634,
+  "T13": 457317989,
+  "U13": 464515718,
+  "V13": 7197729,
+  "W13": 921833707,
+  "X13": 3785055,
+  "Y13": 3546770,
+  "Z13": -238285,
+  "AA13": 7331825,
+  "AB13": 3877318,
+  "AC13": 3412176,
+  "AD13": -465142,
+  "AE13": 7289494,
+  "AF13": 3565479,
+  "AG13": 4812363,
+  "AH13": 1246884,
+  "AI13": 8377842,
+  "AJ13": 9466197,
+  "AK13": 9063279,
+  "AL13": -402918,
+  "AM13": 18529476,
+  "AN13": 2811652,
+  "AO13": 2014550,
+  "AP13": -797102,
+  "AQ13": 4826202,
+  "AR13": 18406,
+  "AS13": 15428,
+  "AT13": -2978,
+  "AU13": 33834,
+  "AV13": 43922,
+  "AW13": 6085,
+  "AX13": -37837,
+  "AY13": 50007,
+  "AZ13": 6184472,
+  "BA13": 3384789,
+  "BB13": -2799683,
+  "BC13": 9569261,
+  "BD13": 321948,
+  "BE13": 64062,
+  "BF13": -257886,
+  "BG13": 386010,
+  "B14": "二市場\r\nTokyo & Nagoya Markets",
+  "C14": "株数 Shares",
+  "D14": 1555705,
+  "E14": 2178295,
+  "F14": 622590,
+  "G14": 3734000,
+  "H14": 57475,
+  "I14": 247,
+  "J14": -57228,
+  "K14": 57722,
+  "L14": 2738701,
+  "M14": 2336032,
+  "N14": -402669,
+  "O14": 5074733,
+  "P14": 2899260,
+  "Q14": 3108583,
+  "R14": 209323,
+  "S14": 6007843,
+  "T14": 8753543,
+  "U14": 8638100,
+  "V14": -115443,
+  "W14": 17391643,
+  "X14": 21144,
+  "Y14": 20693,
+  "Z14": -451,
+  "AA14": 41837,
+  "AB14": 77405,
+  "AC14": 70611,
+  "AD14": -6794,
+  "AE14": 148016,
+  "AF14": 328617,
+  "AG14": 205293,
+  "AH14": -123324,
+  "AI14": 533910,
+  "AJ14": 150871,
+  "AK14": 226133,
+  "AL14": 75262,
+  "AM14": 377004,
+  "AN14": 26914,
+  "AO14": 22711,
+  "AP14": -4203,
+  "AQ14": 49625,
+  "AR14": 26059,
+  "AS14": 4928,
+  "AT14": -21131,
+  "AU14": 30987,
+  "AV14": 82007,
+  "AW14": 6685,
+  "AX14": -75322,
+  "AY14": 88692,
+  "AZ14": 358387,
+  "BA14": 276053,
+  "BB14": -82334,
+  "BC14": 634440,
+  "BD14": 24839,
+  "BE14": 8509,
+  "BF14": -16330,
+  "BG14": 33348,
+  "C15": "金額 Value",
+  "D15": 4168720987,
+  "E15": 5845303467,
+  "F15": 1676582480,
+  "G15": 10014024454,
+  "H15": 165560052,
+  "I15": 1017694,
+  "J15": -164542358,
+  "K15": 166577746,
+  "L15": 2283093482,
+  "M15": 2092469547,
+  "N15": -190623935,
+  "O15": 4375563029,
+  "P15": 9086644188,
+  "Q15": 8965521087,
+  "R15": -121123101,
+  "S15": 18052165275,
+  "T15": 28612421565,
+  "U15": 27968594622,
+  "V15": -643826943,
+  "W15": 56581016187,
+  "X15": 94593286,
+  "Y15": 95911382,
+  "Z15": 1318096,
+  "AA15": 190504668,
+  "AB15": 132602035,
+  "AC15": 123155295,
+  "AD15": -9446740,
+  "AE15": 255757330,
+  "AF15": 797922952,
+  "AG15": 656258568,
+  "AH15": -141664384,
+  "AI15": 1454181520,
+  "AJ15": 377859691,
+  "AK15": 544113028,
+  "AL15": 166253337,
+  "AM15": 921972719,
+  "AN15": 83545160,
+  "AO15": 85449875,
+  "AP15": 1904715,
+  "AQ15": 168995035,
+  "AR15": 70237353,
+  "AS15": 22789949,
+  "AT15": -47447404,
+  "AU15": 93027302,
+  "AV15": 206148029,
+  "AW15": 16422816,
+  "AX15": -189725213,
+  "AY15": 222570845,
+  "AZ15": 1101091077,
+  "BA15": 806788123,
+  "BB15": -294302954,
+  "BC15": 1907879200,
+  "BD15": 67024955,
+  "BE15": 33911090,
+  "BF15": -33113865,
+  "BG15": 100936045
+ },
+ "expected": [
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "bank",
+   "metric": "balance",
+   "value_kjpy": -189725213
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "bank",
+   "metric": "purchases",
+   "value_kjpy": 16422816
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "bank",
+   "metric": "sales",
+   "value_kjpy": 206148029
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "bank",
+   "metric": "total",
+   "value_kjpy": 222570845
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "brokerage",
+   "metric": "balance",
+   "value_kjpy": -1501798391
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "brokerage",
+   "metric": "purchases",
+   "value_kjpy": 41411385382
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "brokerage",
+   "metric": "sales",
+   "value_kjpy": 42913183773
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "brokerage",
+   "metric": "total",
+   "value_kjpy": 84324569155
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "business_corp",
+   "metric": "balance",
+   "value_kjpy": 166253337
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "business_corp",
+   "metric": "purchases",
+   "value_kjpy": 544113028
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "business_corp",
+   "metric": "sales",
+   "value_kjpy": 377859691
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "business_corp",
+   "metric": "total",
+   "value_kjpy": 921972719
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "foreign",
+   "metric": "balance",
+   "value_kjpy": -642508847
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "foreign",
+   "metric": "purchases",
+   "value_kjpy": 28064506004
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "foreign",
+   "metric": "sales",
+   "value_kjpy": 28707014851
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "foreign",
+   "metric": "total",
+   "value_kjpy": 56771520855
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "individual",
+   "metric": "balance",
+   "value_kjpy": -311747036
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "individual",
+   "metric": "purchases",
+   "value_kjpy": 11057990634
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "individual",
+   "metric": "sales",
+   "value_kjpy": 11369737670
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "individual",
+   "metric": "total",
+   "value_kjpy": 22427728304
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "insurance",
+   "metric": "balance",
+   "value_kjpy": -47447404
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "insurance",
+   "metric": "purchases",
+   "value_kjpy": 22789949
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "insurance",
+   "metric": "sales",
+   "value_kjpy": 70237353
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "insurance",
+   "metric": "total",
+   "value_kjpy": 93027302
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "investment_trust",
+   "metric": "balance",
+   "value_kjpy": -141664384
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "investment_trust",
+   "metric": "purchases",
+   "value_kjpy": 656258568
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "investment_trust",
+   "metric": "sales",
+   "value_kjpy": 797922952
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "investment_trust",
+   "metric": "total",
+   "value_kjpy": 1454181520
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_corp",
+   "metric": "balance",
+   "value_kjpy": 1904715
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_corp",
+   "metric": "purchases",
+   "value_kjpy": 85449875
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_corp",
+   "metric": "sales",
+   "value_kjpy": 83545160
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_corp",
+   "metric": "total",
+   "value_kjpy": 168995035
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_financial",
+   "metric": "balance",
+   "value_kjpy": -33113865
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_financial",
+   "metric": "purchases",
+   "value_kjpy": 33911090
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_financial",
+   "metric": "sales",
+   "value_kjpy": 67024955
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "other_financial",
+   "metric": "total",
+   "value_kjpy": 100936045
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "proprietary",
+   "metric": "balance",
+   "value_kjpy": 1512040122
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "proprietary",
+   "metric": "purchases",
+   "value_kjpy": 5846321161
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "proprietary",
+   "metric": "sales",
+   "value_kjpy": 4334281039
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "proprietary",
+   "metric": "total",
+   "value_kjpy": 10180602200
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "securities_co",
+   "metric": "balance",
+   "value_kjpy": -9446740
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "securities_co",
+   "metric": "purchases",
+   "value_kjpy": 123155295
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "securities_co",
+   "metric": "sales",
+   "value_kjpy": 132602035
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "securities_co",
+   "metric": "total",
+   "value_kjpy": 255757330
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "total",
+   "metric": "balance",
+   "value_kjpy": 10241731
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "total",
+   "metric": "purchases",
+   "value_kjpy": 47257706543
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "total",
+   "metric": "sales",
+   "value_kjpy": 47247464812
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "total",
+   "metric": "total",
+   "value_kjpy": 94505171355
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "trust_bank",
+   "metric": "balance",
+   "value_kjpy": -294302954
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "trust_bank",
+   "metric": "purchases",
+   "value_kjpy": 806788123
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "trust_bank",
+   "metric": "sales",
+   "value_kjpy": 1101091077
+  },
+  {
+   "section": "TokyoNagoya",
+   "investor_type": "trust_bank",
+   "metric": "total",
+   "value_kjpy": 1907879200
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "bank",
+   "metric": "balance",
+   "value_kjpy": -37837
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "bank",
+   "metric": "purchases",
+   "value_kjpy": 6085
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "bank",
+   "metric": "sales",
+   "value_kjpy": 43922
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "bank",
+   "metric": "total",
+   "value_kjpy": 50007
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "brokerage",
+   "metric": "balance",
+   "value_kjpy": -8905096
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "brokerage",
+   "metric": "purchases",
+   "value_kjpy": 1077364663
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "brokerage",
+   "metric": "sales",
+   "value_kjpy": 1086269759
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "brokerage",
+   "metric": "total",
+   "value_kjpy": 2163634422
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "business_corp",
+   "metric": "balance",
+   "value_kjpy": -402918
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "business_corp",
+   "metric": "purchases",
+   "value_kjpy": 9063279
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "business_corp",
+   "metric": "sales",
+   "value_kjpy": 9466197
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "business_corp",
+   "metric": "total",
+   "value_kjpy": 18529476
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "foreign",
+   "metric": "balance",
+   "value_kjpy": 6959444
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "foreign",
+   "metric": "purchases",
+   "value_kjpy": 468062488
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "foreign",
+   "metric": "sales",
+   "value_kjpy": 461103044
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "foreign",
+   "metric": "total",
+   "value_kjpy": 929165532
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "individual",
+   "metric": "balance",
+   "value_kjpy": -12347878
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "individual",
+   "metric": "purchases",
+   "value_kjpy": 586529443
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "individual",
+   "metric": "sales",
+   "value_kjpy": 598877321
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "individual",
+   "metric": "total",
+   "value_kjpy": 1185406764
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "insurance",
+   "metric": "balance",
+   "value_kjpy": -2978
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "insurance",
+   "metric": "purchases",
+   "value_kjpy": 15428
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "insurance",
+   "metric": "sales",
+   "value_kjpy": 18406
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "insurance",
+   "metric": "total",
+   "value_kjpy": 33834
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "investment_trust",
+   "metric": "balance",
+   "value_kjpy": 1246884
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "investment_trust",
+   "metric": "purchases",
+   "value_kjpy": 4812363
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "investment_trust",
+   "metric": "sales",
+   "value_kjpy": 3565479
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "investment_trust",
+   "metric": "total",
+   "value_kjpy": 8377842
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_corp",
+   "metric": "balance",
+   "value_kjpy": -797102
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_corp",
+   "metric": "purchases",
+   "value_kjpy": 2014550
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_corp",
+   "metric": "sales",
+   "value_kjpy": 2811652
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_corp",
+   "metric": "total",
+   "value_kjpy": 4826202
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_financial",
+   "metric": "balance",
+   "value_kjpy": -257886
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_financial",
+   "metric": "purchases",
+   "value_kjpy": 64062
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_financial",
+   "metric": "sales",
+   "value_kjpy": 321948
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "other_financial",
+   "metric": "total",
+   "value_kjpy": 386010
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "proprietary",
+   "metric": "balance",
+   "value_kjpy": 8612541
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "proprietary",
+   "metric": "purchases",
+   "value_kjpy": 123052420
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "proprietary",
+   "metric": "sales",
+   "value_kjpy": 114439879
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "proprietary",
+   "metric": "total",
+   "value_kjpy": 237492299
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "securities_co",
+   "metric": "balance",
+   "value_kjpy": -465142
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "securities_co",
+   "metric": "purchases",
+   "value_kjpy": 3412176
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "securities_co",
+   "metric": "sales",
+   "value_kjpy": 3877318
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "securities_co",
+   "metric": "total",
+   "value_kjpy": 7289494
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "total",
+   "metric": "balance",
+   "value_kjpy": -292555
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "total",
+   "metric": "purchases",
+   "value_kjpy": 1200417083
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "total",
+   "metric": "sales",
+   "value_kjpy": 1200709638
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "total",
+   "metric": "total",
+   "value_kjpy": 2401126721
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "trust_bank",
+   "metric": "balance",
+   "value_kjpy": -2799683
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "trust_bank",
+   "metric": "purchases",
+   "value_kjpy": 3384789
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "trust_bank",
+   "metric": "sales",
+   "value_kjpy": 6184472
+  },
+  {
+   "section": "TSEGrowth",
+   "investor_type": "trust_bank",
+   "metric": "total",
+   "value_kjpy": 9569261
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "bank",
+   "metric": "balance",
+   "value_kjpy": -188928602
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "bank",
+   "metric": "purchases",
+   "value_kjpy": 16344798
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "bank",
+   "metric": "sales",
+   "value_kjpy": 205273400
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "bank",
+   "metric": "total",
+   "value_kjpy": 221618198
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "brokerage",
+   "metric": "balance",
+   "value_kjpy": -1483870188
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "brokerage",
+   "metric": "purchases",
+   "value_kjpy": 39399006012
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "brokerage",
+   "metric": "sales",
+   "value_kjpy": 40882876200
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "brokerage",
+   "metric": "total",
+   "value_kjpy": 80281882212
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "business_corp",
+   "metric": "balance",
+   "value_kjpy": 166229060
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "business_corp",
+   "metric": "purchases",
+   "value_kjpy": 513026472
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "business_corp",
+   "metric": "sales",
+   "value_kjpy": 346797412
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "business_corp",
+   "metric": "total",
+   "value_kjpy": 859823884
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "foreign",
+   "metric": "balance",
+   "value_kjpy": -671952210
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "foreign",
+   "metric": "purchases",
+   "value_kjpy": 27121394706
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "foreign",
+   "metric": "sales",
+   "value_kjpy": 27793346916
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "foreign",
+   "metric": "total",
+   "value_kjpy": 54914741622
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "individual",
+   "metric": "balance",
+   "value_kjpy": -274949677
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "individual",
+   "metric": "purchases",
+   "value_kjpy": 10054117132
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "individual",
+   "metric": "sales",
+   "value_kjpy": 10329066809
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "individual",
+   "metric": "total",
+   "value_kjpy": 20383183941
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "insurance",
+   "metric": "balance",
+   "value_kjpy": -46377203
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "insurance",
+   "metric": "purchases",
+   "value_kjpy": 22736817
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "insurance",
+   "metric": "sales",
+   "value_kjpy": 69114020
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "insurance",
+   "metric": "total",
+   "value_kjpy": 91850837
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "investment_trust",
+   "metric": "balance",
+   "value_kjpy": -142549007
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "investment_trust",
+   "metric": "purchases",
+   "value_kjpy": 645896260
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "investment_trust",
+   "metric": "sales",
+   "value_kjpy": 788445267
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "investment_trust",
+   "metric": "total",
+   "value_kjpy": 1434341527
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_corp",
+   "metric": "balance",
+   "value_kjpy": 2344445
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_corp",
+   "metric": "purchases",
+   "value_kjpy": 81052140
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_corp",
+   "metric": "sales",
+   "value_kjpy": 78707695
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_corp",
+   "metric": "total",
+   "value_kjpy": 159759835
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_financial",
+   "metric": "balance",
+   "value_kjpy": -31689308
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_financial",
+   "metric": "purchases",
+   "value_kjpy": 33711645
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_financial",
+   "metric": "sales",
+   "value_kjpy": 65400953
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "other_financial",
+   "metric": "total",
+   "value_kjpy": 99112598
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "proprietary",
+   "metric": "balance",
+   "value_kjpy": 1493959041
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "proprietary",
+   "metric": "purchases",
+   "value_kjpy": 5598960488
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "proprietary",
+   "metric": "sales",
+   "value_kjpy": 4105001447
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "proprietary",
+   "metric": "total",
+   "value_kjpy": 9703961935
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "securities_co",
+   "metric": "balance",
+   "value_kjpy": -7494776
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "securities_co",
+   "metric": "purchases",
+   "value_kjpy": 114646332
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "securities_co",
+   "metric": "sales",
+   "value_kjpy": 122141108
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "securities_co",
+   "metric": "total",
+   "value_kjpy": 236787440
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "total",
+   "metric": "balance",
+   "value_kjpy": 10088853
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "total",
+   "metric": "purchases",
+   "value_kjpy": 44997966500
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "total",
+   "metric": "sales",
+   "value_kjpy": 44987877647
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "total",
+   "metric": "total",
+   "value_kjpy": 89985844147
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "trust_bank",
+   "metric": "balance",
+   "value_kjpy": -288502910
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "trust_bank",
+   "metric": "purchases",
+   "value_kjpy": 796079710
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "trust_bank",
+   "metric": "sales",
+   "value_kjpy": 1084582620
+  },
+  {
+   "section": "TSEPrime",
+   "investor_type": "trust_bank",
+   "metric": "total",
+   "value_kjpy": 1880662330
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "bank",
+   "metric": "balance",
+   "value_kjpy": -747940
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "bank",
+   "metric": "purchases",
+   "value_kjpy": 71933
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "bank",
+   "metric": "sales",
+   "value_kjpy": 819873
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "bank",
+   "metric": "total",
+   "value_kjpy": 891806
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "brokerage",
+   "metric": "balance",
+   "value_kjpy": -9036596
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "brokerage",
+   "metric": "purchases",
+   "value_kjpy": 933086588
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "brokerage",
+   "metric": "sales",
+   "value_kjpy": 942123184
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "brokerage",
+   "metric": "total",
+   "value_kjpy": 1875209772
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "business_corp",
+   "metric": "balance",
+   "value_kjpy": 446406
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "business_corp",
+   "metric": "purchases",
+   "value_kjpy": 21993284
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "business_corp",
+   "metric": "sales",
+   "value_kjpy": 21546878
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "business_corp",
+   "metric": "total",
+   "value_kjpy": 43540162
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "foreign",
+   "metric": "balance",
+   "value_kjpy": 22454469
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "foreign",
+   "metric": "purchases",
+   "value_kjpy": 474925577
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "foreign",
+   "metric": "sales",
+   "value_kjpy": 452471108
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "foreign",
+   "metric": "total",
+   "value_kjpy": 927396685
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "individual",
+   "metric": "balance",
+   "value_kjpy": -24548685
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "individual",
+   "metric": "purchases",
+   "value_kjpy": 415762013
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "individual",
+   "metric": "sales",
+   "value_kjpy": 440310698
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "individual",
+   "metric": "total",
+   "value_kjpy": 856072711
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "insurance",
+   "metric": "balance",
+   "value_kjpy": -1017451
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "insurance",
+   "metric": "purchases",
+   "value_kjpy": 37704
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "insurance",
+   "metric": "sales",
+   "value_kjpy": 1055155
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "insurance",
+   "metric": "total",
+   "value_kjpy": 1092859
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "investment_trust",
+   "metric": "balance",
+   "value_kjpy": -393554
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "investment_trust",
+   "metric": "purchases",
+   "value_kjpy": 5510953
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "investment_trust",
+   "metric": "sales",
+   "value_kjpy": 5904507
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "investment_trust",
+   "metric": "total",
+   "value_kjpy": 11415460
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_corp",
+   "metric": "balance",
+   "value_kjpy": 321460
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_corp",
+   "metric": "purchases",
+   "value_kjpy": 2343363
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_corp",
+   "metric": "sales",
+   "value_kjpy": 2021903
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_corp",
+   "metric": "total",
+   "value_kjpy": 4365266
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_financial",
+   "metric": "balance",
+   "value_kjpy": -1166670
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_financial",
+   "metric": "purchases",
+   "value_kjpy": 45140
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_financial",
+   "metric": "sales",
+   "value_kjpy": 1211810
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "other_financial",
+   "metric": "total",
+   "value_kjpy": 1256950
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "proprietary",
+   "metric": "balance",
+   "value_kjpy": 9484542
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "proprietary",
+   "metric": "purchases",
+   "value_kjpy": 124286924
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "proprietary",
+   "metric": "sales",
+   "value_kjpy": 114802382
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "proprietary",
+   "metric": "total",
+   "value_kjpy": 239089306
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "securities_co",
+   "metric": "balance",
+   "value_kjpy": -1420731
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "securities_co",
+   "metric": "purchases",
+   "value_kjpy": 5080191
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "securities_co",
+   "metric": "sales",
+   "value_kjpy": 6500922
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "securities_co",
+   "metric": "total",
+   "value_kjpy": 11581113
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "total",
+   "metric": "balance",
+   "value_kjpy": 447946
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "total",
+   "metric": "purchases",
+   "value_kjpy": 1057373512
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "total",
+   "metric": "sales",
+   "value_kjpy": 1056925566
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "total",
+   "metric": "total",
+   "value_kjpy": 2114299078
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "trust_bank",
+   "metric": "balance",
+   "value_kjpy": -2963900
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "trust_bank",
+   "metric": "purchases",
+   "value_kjpy": 7316430
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "trust_bank",
+   "metric": "sales",
+   "value_kjpy": 10280330
+  },
+  {
+   "section": "TSEStandard",
+   "investor_type": "trust_bank",
+   "metric": "total",
+   "value_kjpy": 17596760
+  }
+ ]
+}

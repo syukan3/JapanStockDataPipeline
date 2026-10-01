@@ -41,6 +41,8 @@ export function toTopixBarDailyRecord(item: TopixBarDailyItem): TopixBarDailyRec
     high: item.H,
     low: item.L,
     close: item.C,
+    // upsert の DO UPDATE では DEFAULT が効かないので明示する（推計行を公式値で上書きしたとき source も戻す）
+    source: 'jquants',
   };
 }
 

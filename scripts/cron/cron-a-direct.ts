@@ -28,6 +28,7 @@ import { syncFinancialSummaryForDate } from '../../src/lib/jquants/endpoints/fin
 import { getJSTDate } from '../../src/lib/utils/date';
 import { isBusinessDayInDB } from '../../src/lib/cron/business-day';
 import { runForwardFill, type ForwardFillDatasetConfig } from '../../src/lib/cron/forward-fill';
+import { exitIfJQuantsOff } from '../../src/lib/data-source/script-guard';
 
 const SUPPORTED_DATASETS = ['equity_bars', 'topix', 'financial', 'equity_master'] as const;
 type Dataset = (typeof SUPPORTED_DATASETS)[number];
@@ -114,6 +115,8 @@ async function runEquityMaster(
 
 async function main(): Promise<void> {
   const dataset = parseDataset();
+  // J-Quants OFF（00132）なら API キーの検証より前に止める（OFF 中はキーが無くてもよい）
+  await exitIfJQuantsOff(`cron-a-direct ${dataset}`);
   validateEnv();
 
   const logger = createLogger({ module: 'cron-a-direct', dataset });

@@ -35,10 +35,13 @@ import {
   WEEKLY_BARS_TABLE,
   WEEKLY_BARS_ON_CONFLICT,
 } from '../../src/lib/analytics/weekly-bars-backfill';
+import { getJQuantsMode } from '../../src/lib/data-source/jquants-mode';
 import {
   aggregateWeeklyBarsByCode,
   applyWeeklyRebaseEvents,
+  detectAltSplitEventsInWindow,
   detectTrackedEventsInWindow,
+  getLatestTrackedTradeDate,
   fetchAppliedRebaseEventKeys,
   fetchDailyBarsForCodes,
   fetchWeeklyClosesSince,
@@ -49,8 +52,13 @@ import {
   RECENT_WEEKS,
 } from '../../src/lib/analytics/refresh-weekly-bars';
 
-function validateEnv(): void {
-  const required = ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'JQUANTS_API_KEY'];
+function validateEnv(jquantsEnabled: boolean): void {
+  // J-Quants OFF 中は新規銘柄のバックフィル（J-Quants API）をしないので API キーを要求しない
+  const required = [
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    ...(jquantsEnabled ? ['JQUANTS_API_KEY'] : []),
+  ];
   const missing = required.filter((k) => !process.env[k]);
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
@@ -58,8 +66,12 @@ function validateEnv(): void {
 }
 
 async function main(): Promise<void> {
-  validateEnv();
+  // J-Quants の ON/OFF（00132）。OFF 中は統合ビュー（公式＋Yahoo。00133）から週足を作り続ける
+  // （保有・ウォッチ銘柄の長期チャートを止めない。計画書 DP-7b）。
+  const mode = await getJQuantsMode({ fresh: true });
+  validateEnv(mode.enabled);
   const logger = createLogger({ module: 'refresh-weekly-bars' });
+  const priceTable = mode.enabled ? 'equity_bar_daily' : 'v_equity_price_daily';
 
   const core = createAdminClient('jquants_core');
   const analytics = createAdminClient('analytics');
@@ -73,11 +85,15 @@ async function main(): Promise<void> {
     return;
   }
 
-  const latestTradeDate = await getLatestTradeDate(core);
-  logger.info('Latest trade date', { latestTradeDate });
+  const latestTradeDate = mode.enabled
+    ? await getLatestTradeDate(core)
+    : await getLatestTrackedTradeDate(core, codes);
+  logger.info('Latest trade date', { latestTradeDate, jquants: mode.enabled, priceTable });
 
   // 2) 新規追跡銘柄を10年バックフィル（直列。60req/min は J-Quants クライアントのトークンバケット）
-  const newCodes = await findCodesWithoutWeeklyBars(analytics, codes);
+  //    J-Quants OFF 中は API を呼べないので飛ばす（ON 復帰後の初回実行で埋まる）
+  const newCodes = mode.enabled ? await findCodesWithoutWeeklyBars(analytics, codes) : [];
+  if (!mode.enabled) logger.info('J-Quants OFF: 新規追跡銘柄の10年バックフィルは ON 復帰後に行う');
   logger.info('New tracked codes to backfill', { count: newCodes.length, codes: newCodes });
 
   const { from: backfillFrom } = getBackfillRange(latestTradeDate);
@@ -107,7 +123,9 @@ async function main(): Promise<void> {
 
   // 3) 分割・併合の検知 → 台帳未記録のみをイベント日の降順に RPC 適用
   const windowStart = subtractDays(latestTradeDate, DETECT_LOOKBACK_DAYS);
-  const detected = await detectTrackedEventsInWindow(core, codes, latestTradeDate);
+  const detected = mode.enabled
+    ? await detectTrackedEventsInWindow(core, codes, latestTradeDate)
+    : await detectAltSplitEventsInWindow(core, codes, latestTradeDate);
   const appliedKeys = await fetchAppliedRebaseEventKeys(analytics, codes, windowStart, latestTradeDate);
   const pending = selectUnappliedEvents(detected, codes, appliedKeys);
   logger.info('Detected adjustment events', {
@@ -129,7 +147,7 @@ async function main(): Promise<void> {
 
   // 4) 直近2 ISO週を日足から再集計（週の途中も同一 week_start 行を冪等更新）
   const weeksFrom = recentWeeksStart(latestTradeDate);
-  const dailyBars = await fetchDailyBarsForCodes(core, codes, weeksFrom, latestTradeDate);
+  const dailyBars = await fetchDailyBarsForCodes(core, codes, weeksFrom, latestTradeDate, priceTable);
   const weeklyBars = aggregateWeeklyBarsByCode(dailyBars);
   logger.info('Recent weeks aggregated', {
     weeks: RECENT_WEEKS,

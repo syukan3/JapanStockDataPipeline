@@ -1,6 +1,12 @@
 # Cron A - Daily Data Sync
 # JST 18:40 (UTC 09:40) - 当日の確定データ取り込み（市場終了後）
 # 対象: カレンダー、株価、TOPIX、財務、銘柄マスタ
+#
+# J-Quants の ON/OFF（00132・docs/PLANS-jquants-off-switch-2026-10.md）で経路が分かれる:
+#   ON : J-Quants カレンダー → 株価/TOPIX/財務/マスタ → analytics 再計算（従来どおり）
+#        ＋ 代替価格（Yahoo）をシャドーで取得（統合ビューは公式優先なので画面は変わらない）
+#   OFF: 生成カレンダー → 代替価格（Yahoo）＋ TOPIX 推計 → 長期週足 → 市場指標（外部・nikkei225jp）
+#        J-Quants 依存の同期と analytics 再計算は equity_bars のゲートで自動的にスキップされる
 
 name: Cron A - Daily Data Sync
 run-name: ${{ inputs.dispatch_label && format('{0} · {1}', github.workflow, inputs.dispatch_label) || github.workflow }}
@@ -39,8 +45,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # J-Quants の ON/OFF を読む。読めなければ失敗し、ON・OFF どちらの経路も走らない（推測しない）
+      - name: Read J-Quants mode
+        id: mode
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/cron/jquants-mode.ts
+
       - name: Trigger Cron A - Calendar
         id: calendar
+        if: steps.mode.outputs.enabled == 'true'
         run: |
           curl -X POST "${{ secrets.VERCEL_URL }}/api/cron/jquants/a" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
@@ -48,9 +63,22 @@ jobs:
             -d '{"dataset": "calendar"}' \
             --fail --silent --show-error --max-time 120
 
+      # OFF: 内閣府祝日CSVから営業日カレンダーを生成し、まだ無い日だけを入れる。
+      # job_runs('cron_a') もここで記録する（未達検知 00061 が cron_a を見続けられるように）。
+      - name: Generate trading calendar (J-Quants OFF)
+        id: calendar_generated
+        if: steps.mode.outputs.enabled == 'false'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM || 'JapanStockDataPipeline <noreply@resend.dev>' }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: npx tsx scripts/cron/sync-calendar-generated.ts
+
       - name: Sync Equity Bars (direct)
         id: equity_bars
-        if: always() && steps.calendar.outcome == 'success'
+        if: always() && steps.mode.outputs.enabled == 'true' && steps.calendar.outcome == 'success'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -58,7 +86,7 @@ jobs:
         run: npx tsx scripts/cron/cron-a-direct.ts equity_bars
 
       - name: Sync TOPIX (direct)
-        if: always() && steps.calendar.outcome == 'success'
+        if: always() && steps.mode.outputs.enabled == 'true' && steps.calendar.outcome == 'success'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -67,7 +95,7 @@ jobs:
 
       - name: Sync Financial (direct)
         id: financial
-        if: always() && steps.calendar.outcome == 'success'
+        if: always() && steps.mode.outputs.enabled == 'true' && steps.calendar.outcome == 'success'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -76,7 +104,7 @@ jobs:
 
       - name: Sync Equity Master (direct)
         id: equity_master
-        if: always() && steps.calendar.outcome == 'success'
+        if: always() && steps.mode.outputs.enabled == 'true' && steps.calendar.outcome == 'success'
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -193,15 +221,39 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npx tsx scripts/cron/refresh-market-indicators.ts --only-breadth
 
+      # 代替価格（Yahoo）: 保有・ウォッチ銘柄と固定ETF（1306・マクロ対立軸8本）の日足を
+      # alt_equity_bar_daily へ。OFF 中は TOPIX 推計（1306 の騰落で延長）も topix_bar_daily へ書く。
+      # ON 中はシャドー運転（書くのは代替表だけ・TOPIX は公式値との差をログに出すだけ）なので
+      # 失敗しても Cron A を失敗扱いにしない。OFF 中は評価額・TOPIX が止まるので失敗を通知する。
+      # Yahoo の 429 が続く場合は repo 変数 YAHOO_USE_PROXY=true で東京リージョンの自前ルート経由にする。
+      - name: Sync alternative prices (Yahoo) + TOPIX proxy
+        id: alt_prices
+        if: always() && steps.mode.outcome == 'success' && (steps.mode.outputs.enabled == 'false' || steps.rebase.outcome == 'success')
+        continue-on-error: ${{ steps.mode.outputs.enabled == 'true' }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          YAHOO_PROXY_BASE_URL: ${{ vars.YAHOO_USE_PROXY == 'true' && secrets.VERCEL_URL || '' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM || 'JapanStockDataPipeline <noreply@resend.dev>' }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: npx tsx scripts/cron/sync-alt-prices.ts
+
       # 保有・ウォッチ銘柄限定の長期週足（analytics.equity_bar_weekly）を日次メンテ。
       # 新規追跡銘柄の10年バックフィル / 分割・併合の検知→再基準化RPC / 直近2週の再集計。
       # 後続ステップはこのステップに依存しないが、失敗は他ステップ同様に通知メールへ流す
       # （continue-on-error にすると 00124 未適用等の恒久障害がサイレント化する。
       # 一過性の失敗は翌日の検知7日窓＋2週集計窓で自己修復する）。
       # rebase 失敗時はスキップする（分割が未調整の日足から週足を作らないため）。
+      # J-Quants OFF 中は統合ビュー（公式＋Yahoo）から作るので、代替価格の成功を条件にする。
       - name: Refresh weekly bars (tracked stocks)
         id: refresh_weekly_bars
-        if: always() && steps.equity_bars.outcome == 'success' && steps.rebase.outcome == 'success'
+        if: >-
+          always() && (
+            (steps.mode.outputs.enabled == 'true' && steps.equity_bars.outcome == 'success' && steps.rebase.outcome == 'success') ||
+            (steps.mode.outputs.enabled == 'false' && steps.alt_prices.outcome == 'success')
+          )
         env:
           # 新規追跡銘柄のバックフィルのみ J-Quants を叩く（直近2週の更新は equity_bar_daily から）
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
@@ -212,15 +264,18 @@ jobs:
 
       # external(Yahoo/nikkei225jp)/weekly/derived は株価同期と独立に実行できる
       # （日経終値・PER等は外部ソース由来。同期失敗日でも取り込みを止めない）。
+      # J-Quants OFF 中は生成カレンダーの成功を条件にし、空売り比率は nikkei225jp・騰落レシオ／
+      # 新高値・新安値も nikkei225jp で埋める（breadth_source='nikkei225jp'）。TOPIX/NT倍率は推計。
       - name: Refresh market indicators - external
-        if: always() && steps.calendar.outcome == 'success'
+        if: always() && (steps.calendar.outcome == 'success' || steps.calendar_generated.outcome == 'success')
         continue-on-error: true
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          # 空売り比率はJ-Quants公式データ(short_selling_sector)から算出（2026-07切替）
+          # 空売り比率は ON 中は J-Quants 公式データ(short_selling_sector)から算出（2026-07切替）、
+          # OFF 中は nikkei225jp daily2（スクリプト側でもモードを見て二重に守る）
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
-          SHORT_RATIO_SOURCE: jquants
+          SHORT_RATIO_SOURCE: ${{ steps.mode.outputs.short_ratio_source }}
           # nikkei225jp.com は 2026-07-17 以降このランナー（米国リージョン）からの
           # 直接取得が 403 になったため、東京リージョン固定の自前ルート経由で取得する。
           NIKKEI225JP_PROXY_BASE_URL: ${{ secrets.VERCEL_URL }}

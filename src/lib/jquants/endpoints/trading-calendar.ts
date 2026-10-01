@@ -48,6 +48,8 @@ export function toTradingCalendarRecord(item: TradingCalendarItem): TradingCalen
     calendar_date: item.Date,
     hol_div: item.HolDiv,
     is_business_day: isBusinessDay(item.HolDiv),
+    // upsert の DO UPDATE では DEFAULT が効かないので明示する（生成行を公式値で上書きしたとき source も戻す）
+    source: 'jquants',
   };
 }
 

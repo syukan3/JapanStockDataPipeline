@@ -30,7 +30,7 @@ export class EnvironmentError extends Error {
  *
  * @throws {EnvironmentError} 必須環境変数が不足している場合
  */
-export function loadEnv(): void {
+export function loadEnv(options?: { requireJQuants?: boolean }): void {
   // 既にロード済みならスキップ
   if (envLoaded) return;
 
@@ -39,10 +39,11 @@ export function loadEnv(): void {
   config({ path: envPath });
 
   // 必須環境変数の検証
+  // J-Quants を使わない seed（市場指標・財務省）は API キーを要求しない（J-Quants OFF 中も動かすため）
   const required = [
     'NEXT_PUBLIC_SUPABASE_URL',
     'SUPABASE_SERVICE_ROLE_KEY',
-    'JQUANTS_API_KEY',
+    ...(options?.requireJQuants === false ? [] : ['JQUANTS_API_KEY']),
   ];
 
   const missing = required.filter((key) => !process.env[key]);

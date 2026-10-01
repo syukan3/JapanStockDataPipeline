@@ -33,6 +33,7 @@ vi.mock('@/lib/utils/retry', () => ({
 }));
 
 import { fetchWithRetry, RetryableError, NonRetryableError } from '@/lib/utils/retry';
+import { assertJQuantsEnabled, JQuantsDisabledError } from '@/lib/data-source/jquants-mode';
 
 describe('jquants/client.ts', () => {
   const originalEnv = process.env;
@@ -70,6 +71,18 @@ describe('jquants/client.ts', () => {
     it('オプションでタイムアウトを指定できる', () => {
       const client = new JQuantsClient({ timeoutMs: 60000 });
       expect(client).toBeDefined();
+    });
+  });
+
+  describe('J-Quants OFF（00132 のスイッチ）', () => {
+    it('OFF なら API を一切呼ばずに JQuantsDisabledError を投げる', async () => {
+      vi.mocked(assertJQuantsEnabled).mockRejectedValue(new JQuantsDisabledError('/markets/calendar'));
+      const client = new JQuantsClient();
+
+      await expect(client.getTradingCalendar({ from: '2026-10-01', to: '2026-10-31' })).rejects.toBeInstanceOf(
+        JQuantsDisabledError
+      );
+      expect(fetchWithRetry).not.toHaveBeenCalled();
     });
   });
 

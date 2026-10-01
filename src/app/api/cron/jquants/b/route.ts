@@ -9,6 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import { requireCronAuth } from '@/lib/cron/auth';
+import { jquantsGate } from '@/lib/cron/jquants-gate';
 import { acquireLock, releaseLock } from '@/lib/cron/job-lock';
 import { startJobRun, completeJobRun } from '@/lib/cron/job-run';
 import { getNextBusinessDay } from '@/lib/cron/business-day';
@@ -31,6 +32,12 @@ export async function POST(request: Request): Promise<Response> {
   const authError = requireCronAuth(request);
   if (authError) {
     return authError;
+  }
+
+  // 1b. J-Quants OFF なら handler を作る前に止める（00132 のスイッチ。§3.4 最終防衛線）
+  const gated = await jquantsGate('/api/cron/jquants/b');
+  if (gated) {
+    return gated;
   }
 
   // 2. coverage 対象日を trading_calendar から先に確定する。

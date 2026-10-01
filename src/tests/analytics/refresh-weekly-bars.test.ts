@@ -14,7 +14,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   aggregateWeeklyBarsByCode,
   applyWeeklyRebaseEvents,
+  detectAltSplitEventsInWindow,
   detectTrackedEventsInWindow,
+  getLatestTrackedTradeDate,
   fetchAppliedRebaseEventKeys,
   fetchDailyBarsForCodes,
   fetchWeeklyClosesSince,
@@ -724,5 +726,42 @@ describe('findWeeklyDailyMismatches', () => {
       [daily('72030', '2026-08-21', 110), daily('13060', '2026-08-21', 3000)]
     );
     expect(mismatches.map((m) => m.local_code)).toEqual(['13060', '72030']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// J-Quants OFF 中（00132/00133）: 統合ビューと alt_split_events から週足を保つ
+// ---------------------------------------------------------------------------
+
+describe('J-Quants OFF 中の週足', () => {
+  it('alt_split_events を J-Quants と同じ係数（1/比率）のイベントにする', async () => {
+    const client = createClient({
+      alt_split_events: [
+        ok([
+          { local_code: '19250', ex_date: '2026-09-29', ratio: '2' },
+          { local_code: '19040', ex_date: '2026-09-29', ratio: 4 },
+          { local_code: '99990', ex_date: '2026-09-29', ratio: 0 },
+        ]),
+      ],
+    });
+    const events = await detectAltSplitEventsInWindow(client, ['19250', '19040', '99990'], '2026-09-30');
+    expect(events).toEqual([
+      { local_code: '19250', trade_date: '2026-09-29', adjustment_factor: 0.5 },
+      { local_code: '19040', trade_date: '2026-09-29', adjustment_factor: 0.25 },
+    ]);
+    expect(client.calls.alt_split_events).toContainEqual(['gte', 'ex_date', subtractDays('2026-09-30', DETECT_LOOKBACK_DAYS)]);
+  });
+
+  it('統合ビュー上の追跡銘柄の最新日を返す（無ければ例外）', async () => {
+    const client = createClient({ v_equity_price_daily: [ok([{ trade_date: '2026-10-01' }]), ok([])] });
+    await expect(getLatestTrackedTradeDate(client, ['50160'])).resolves.toBe('2026-10-01');
+    await expect(getLatestTrackedTradeDate(client, ['50160'])).rejects.toThrow(/1行もありません/);
+  });
+
+  it('fetchDailyBarsForCodes は OFF 中は統合ビューから読む', async () => {
+    const client = createClient({ v_equity_price_daily: [ok([{ trade_date: '2026-10-01', local_code: '50160' }])] });
+    const rows = await fetchDailyBarsForCodes(client, ['50160'], '2026-09-21', '2026-10-01', 'v_equity_price_daily');
+    expect(rows).toHaveLength(1);
+    expect(client.from).toHaveBeenCalledWith('v_equity_price_daily');
   });
 });

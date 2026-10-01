@@ -12,6 +12,7 @@
 import { getJQuantsRateLimiter } from './rate-limiter';
 import { fetchWithRetry, RetryableError, NonRetryableError } from '../utils/retry';
 import { createLogger, type LogContext } from '../utils/logger';
+import { assertJQuantsEnabled } from '../data-source/jquants-mode';
 import type {
   TradingCalendarResponse,
   EquityMasterResponse,
@@ -77,6 +78,10 @@ export class JQuantsClient {
     endpoint: string,
     options?: RequestOptions
   ): Promise<T> {
+    // 最終防衛線: OFF 中は API を一切呼ばない（解約後は Free プラン扱いで12週遅れのデータが返り、
+    // 黙って古い値を書き込みかねない）。どの経路から来ても必ずここを通る。
+    await assertJQuantsEnabled(endpoint);
+
     // レート制限を適用
     const rateLimiter = getJQuantsRateLimiter();
     await rateLimiter.acquire();

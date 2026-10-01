@@ -79,7 +79,7 @@ function parseSeedArgs(seriesStart: string): Args {
 }
 
 async function main(): Promise<void> {
-  loadEnv();
+  loadEnv({ requireJQuants: false });
   const { SERIES_START } = await import('../../src/lib/market/indicators-sync');
   const args = parseSeedArgs(SERIES_START);
   console.log('Starting Market Indicators Seed');
