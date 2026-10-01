@@ -5,7 +5,7 @@
  * J-Quants Light は日経225指数を配信しない（TOPIXのみ）ため、
  * 日経平均の日次OHLCは Yahoo Finance chart API から取得する。
  * - query2 ホストを使用（query1 はレート制限が厳しい実測結果）
- * - ブラウザ相当の User-Agent を送る（無UAはブロックされる）
+ * - User-Agent は `Mozilla/5.0`（YAHOO_USER_AGENT）。無UA・Chrome 風の長い UA・curl の UA は 429 になる（2026-10-02 実測）
  * - 日次バッチで1リクエスト想定の低頻度アクセス
  * - indicators.quote[0] の open/high/low には null穴があり得る（close はある日でも）。
  *   close が null の日は行ごと除外し、OHLC の null は null のまま保持する。
@@ -21,6 +21,16 @@ const CHART_URL = 'https://query2.finance.yahoo.com/v8/finance/chart/%5EN225';
 
 export const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+
+/**
+ * Yahoo へ送る User-Agent。
+ *
+ * 2026-10-02 実測: Chrome 風の長い UA（BROWSER_USER_AGENT）や curl の UA には query1/query2 とも
+ * 恒常的に 429 を返し、`Mozilla/5.0` だけなら 200 を返す（IP ではなく UA で振り分けている）。
+ * 2026-07 の「Yahoo の 429 恒常化」もこれが原因とみられる。nikkei225jp・日経公式は
+ * BROWSER_USER_AGENT のままでよいので、Yahoo 専用の定数を持つ。
+ */
+export const YAHOO_USER_AGENT = 'Mozilla/5.0';
 
 /** Yahoo向けレート制限（保守的に 10 req/min・最小間隔2s） */
 let rateLimiter: RateLimiter | null = null;
@@ -140,7 +150,7 @@ export async function fetchNikkeiDailyBars(from: string, to: string): Promise<Da
   logger.info('Fetching Yahoo chart', { from, to });
   const res = await fetchWithRetry(
     url,
-    { headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'application/json' } },
+    { headers: { 'User-Agent': YAHOO_USER_AGENT, Accept: 'application/json' } },
     { maxRetries: 3, baseDelayMs: 2000 }
   );
   const json = (await res.json()) as unknown;

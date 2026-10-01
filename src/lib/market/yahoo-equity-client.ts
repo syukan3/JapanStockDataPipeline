@@ -18,7 +18,9 @@
 import { fetchWithRetry } from '../utils/retry';
 import { RateLimiter } from '../jquants/rate-limiter';
 import { createLogger } from '../utils/logger';
-import { BROWSER_USER_AGENT, epochToJstDate, jstDateToEpoch } from './yahoo-chart-client';
+import { YAHOO_USER_AGENT, epochToJstDate, jstDateToEpoch } from './yahoo-chart-client';
+
+export { YAHOO_USER_AGENT };
 
 const logger = createLogger({ module: 'yahoo-equity-client' });
 
@@ -154,7 +156,7 @@ function resolveTarget(symbol: string, query: string): { url: string; headers: R
   }
   return {
     url: `${CHART_BASE}${encodeURIComponent(symbol)}?${query}`,
-    headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'application/json' },
+    headers: { 'User-Agent': YAHOO_USER_AGENT, Accept: 'application/json' },
   };
 }
 

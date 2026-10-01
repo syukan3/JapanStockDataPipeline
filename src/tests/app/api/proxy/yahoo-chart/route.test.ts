@@ -63,6 +63,7 @@ describe('GET /api/proxy/yahoo-chart', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       'https://query2.finance.yahoo.com/v8/finance/chart/200A.T?period1=1788188400&period2=1790780400&interval=1d&events=split'
     );
+    expect(fetchMock.mock.calls[0][1].headers['User-Agent']).toBe('Mozilla/5.0');
   });
 
   it('上流の非 2xx はステータスをそのまま返す（429 のリトライ判定を直接取得と揃える）', async () => {

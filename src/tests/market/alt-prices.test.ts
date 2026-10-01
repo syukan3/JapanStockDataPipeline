@@ -144,3 +144,10 @@ describe('FIXED_ALT_CODES', () => {
     expect(FIXED_ALT_CODES[0]).toBe('13060');
   });
 });
+
+describe('YAHOO_USER_AGENT', () => {
+  it('Yahoo には短い UA を送る（Chrome 風の長い UA は 429 になる・2026-10-02 実測）', async () => {
+    const { YAHOO_USER_AGENT } = await import('@/lib/market/yahoo-equity-client');
+    expect(YAHOO_USER_AGENT).toBe('Mozilla/5.0');
+  });
+});

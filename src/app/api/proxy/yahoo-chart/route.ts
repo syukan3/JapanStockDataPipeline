@@ -17,8 +17,7 @@
 
 import { NextResponse } from 'next/server';
 import { requireCronAuth } from '@/lib/cron/auth';
-import { BROWSER_USER_AGENT } from '@/lib/market/yahoo-chart-client';
-import { YAHOO_TSE_SYMBOL_RE } from '@/lib/market/yahoo-equity-client';
+import { YAHOO_TSE_SYMBOL_RE, YAHOO_USER_AGENT } from '@/lib/market/yahoo-equity-client';
 import { createLogger } from '@/lib/utils/logger';
 
 export const runtime = 'nodejs';
@@ -54,7 +53,7 @@ export async function GET(request: Request): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(upstreamUrl, {
-      headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'application/json' },
+      headers: { 'User-Agent': YAHOO_USER_AGENT, Accept: 'application/json' },
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       cache: 'no-store',
     });
