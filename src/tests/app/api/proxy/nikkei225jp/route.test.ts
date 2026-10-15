@@ -70,7 +70,7 @@ describe('GET /api/proxy/nikkei225jp', () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('var DAILY = [[1,2]];');
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://nikkei225jp.com/_data/_nfsDATA/DAY/daily2.json');
+    expect(url).toBe('https://nikkei225jp.com/_data/_nfsDATA/data_DAY/daily2.json');
     const headers = init.headers as Record<string, string>;
     expect(headers.Referer).toBe('https://nikkei225jp.com/data/sinyou.php');
     expect(headers['User-Agent']).toContain('Mozilla/5.0');
@@ -82,7 +82,7 @@ describe('GET /api/proxy/nikkei225jp', () => {
     await GET(makeRequest('?file=dailyweek2'));
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'https://nikkei225jp.com/_data/_nfsDATA/DAY/dailyweek2.json'
+      'https://nikkei225jp.com/_data/_nfsDATA/data_DAY/dailyweek2.json'
     );
   });
 

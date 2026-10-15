@@ -252,7 +252,7 @@ describe('取得経路の切り替え（NIKKEI225JP_PROXY_BASE_URL）', () => {
     await fetchNikkei225jpWeekly();
 
     const [url, init] = mockFetchWithRetry.mock.calls[0];
-    expect(url).toBe('https://nikkei225jp.com/_data/_nfsDATA/DAY/dailyweek2.json');
+    expect(url).toBe('https://nikkei225jp.com/_data/_nfsDATA/data_DAY/dailyweek2.json');
     expect(init.headers.Referer).toContain('nikkei225jp.com');
   });
 });

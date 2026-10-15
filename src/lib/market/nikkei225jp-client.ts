@@ -40,8 +40,8 @@ import { BROWSER_USER_AGENT } from './yahoo-chart-client';
 
 const logger = createLogger({ module: 'nikkei225jp-client' });
 
-const DAILY2_URL = 'https://nikkei225jp.com/_data/_nfsDATA/DAY/daily2.json';
-const DAILYWEEK2_URL = 'https://nikkei225jp.com/_data/_nfsDATA/DAY/dailyweek2.json';
+const DAILY2_URL = 'https://nikkei225jp.com/_data/_nfsDATA/data_DAY/daily2.json';
+const DAILYWEEK2_URL = 'https://nikkei225jp.com/_data/_nfsDATA/data_DAY/dailyweek2.json';
 /** dailyweek2.json はホットリンク保護があり Referer 必須 */
 const REFERER = 'https://nikkei225jp.com/data/sinyou.php';
 

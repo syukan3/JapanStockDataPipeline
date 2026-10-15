@@ -38,8 +38,8 @@ const logger = createLogger({ module: 'route/proxy-nikkei225jp' });
 
 /** 取得を許可する上流 URL。ここに無いものは一切取得しない。 */
 const ALLOWED_FILES = {
-  daily2: 'https://nikkei225jp.com/_data/_nfsDATA/DAY/daily2.json',
-  dailyweek2: 'https://nikkei225jp.com/_data/_nfsDATA/DAY/dailyweek2.json',
+  daily2: 'https://nikkei225jp.com/_data/_nfsDATA/data_DAY/daily2.json',
+  dailyweek2: 'https://nikkei225jp.com/_data/_nfsDATA/data_DAY/dailyweek2.json',
 } as const;
 
 type AllowedFile = keyof typeof ALLOWED_FILES;
